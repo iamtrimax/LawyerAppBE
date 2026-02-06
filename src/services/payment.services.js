@@ -49,6 +49,7 @@ const verifySePayWebhook = (data, token) => {
 const { getIO } = require("../config/socket");
 
 const client = require("../config/redis");
+const lawyerModel = require("../model/lawyer.model");
 
 const processPaymentWebhook = async (webhookData) => {
     try {
@@ -64,8 +65,17 @@ const processPaymentWebhook = async (webhookData) => {
             const booking = await bookingModel.findById(bookingId);
 
             if (booking) {
+                // Lấy thông tin luật sư để biết tỷ lệ hoa hồng
+                const lawyer = await lawyerModel.findById(booking.lawyerID);
+                const commissionRate = lawyer ? (lawyer.commissionRate || 0) : 0;
+
                 booking.status = 'Confirmed';
                 booking.paymentStatus = 'Paid';
+
+                // Tính toán hoa hồng và số tiền trả cho luật sư
+                booking.commissionAmount = (booking.price * commissionRate) / 100;
+                booking.lawyerPayoutAmount = booking.price - booking.commissionAmount;
+                booking.payoutStatus = lawyer?.isCollaborator ? 'Pending' : 'N/A';
 
                 // Lưu thông tin thanh toán để hoàn tiền sau này
                 booking.paymentInfo = {

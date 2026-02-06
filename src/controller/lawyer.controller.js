@@ -11,7 +11,8 @@ const lawyerRegisterController = async (req, res) => {
     specialty,
     firmName,
     lawyerCardImage,
-    avatar
+    avatar,
+    bankInfo
   } = req.body;
 
   const requiredFields = {
@@ -51,7 +52,8 @@ const lawyerRegisterController = async (req, res) => {
       specialty,
       firmName,
       lawyerCardImage,
-      avatar
+      avatar,
+      bankInfo
     });
 
     res.status(201).json({

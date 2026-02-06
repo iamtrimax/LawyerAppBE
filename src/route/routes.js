@@ -12,7 +12,9 @@ const {
     getArticleDetailController,
     getArticleByLawyerController,
     updateArticleController,
-    deleteArticleController
+    deleteArticleController,
+    aiSearchController,
+    trackArticleDownloadController
 } = require("../controller/article.controller");
 const {
     getResourcesController,
@@ -30,6 +32,7 @@ const {
     updateFormController,
     deleteFormController,
     searchFormsController,
+    viewFileController,
     createLawyerFormController,
     getMyFormsController,
     updateMyFormController,
@@ -47,12 +50,14 @@ const router = express.Router();
 // Định nghĩa các route ở đây
 
 // article routes
+router.get("/articles/ai-search", aiSearchController);
 router.get("/articles", getArticlesController);
 router.get("/articles/:id", getArticleDetailController);
 router.post("/articles/create", verifyAccessToken, verifyLawyer, createArticleController);
 router.get("/articles/lawyer/my-articles", verifyAccessToken, verifyLawyer, getArticleByLawyerController);
 router.put("/articles/update/:id", verifyAccessToken, verifyLawyer, updateArticleController);
 router.delete("/articles/delete/:id", verifyAccessToken, verifyLawyer, deleteArticleController);
+router.post("/articles/:id/download", verifyAccessToken, trackArticleDownloadController);
 
 //user routes
 router.post("/register", userRegisterController);
@@ -80,7 +85,8 @@ router.get("/legal-resources/:id", getResourceDetailController);
 router.get("/legal-forms", getFormsController);
 router.get("/legal-forms/search", searchFormsController);
 router.get("/legal-forms/:id", getFormDetailController);
-router.post("/legal-forms/:id/download", trackDownloadController);
+router.get("/legal-forms/view/:id.png", viewFileController);
+router.post("/legal-forms/:id/download", verifyAccessToken, trackDownloadController);
 
 // lawyer routes
 router.post("/lawyer/register", lawyerRegisterController)

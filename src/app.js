@@ -24,7 +24,7 @@ const server = http.createServer(app);
 initSocket(server);
 
 connectMongoDb().then(() => {
-    server.listen(process.env.PORT || 3000, "0.0.0.0", () => {
+    server.listen(process.env.PORT || 3000, '::', () => {
         console.log(`Server đang chạy `);
     });
 }).catch((error) => {

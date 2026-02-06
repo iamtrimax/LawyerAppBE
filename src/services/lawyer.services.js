@@ -16,7 +16,8 @@ const lawyerRegister = async (userData) => {
     specialty,
     firmName,
     lawyerCardImage,
-    avatar
+    avatar,
+    bankInfo
   } = userData;
 
   // 1. Kiểm tra User tồn tại hay chưa
@@ -28,15 +29,23 @@ const lawyerRegister = async (userData) => {
 
   if (user) {
     if (user.isVerified) {
-      throw new Error("Tài khoản email này đã được sử dụng và xác minh.");
+      if (user.role === 'lawyer') {
+        throw new Error("Tài khoản email này đã được sử dụng và xác minh là luật sư.");
+      }
+      if (user.role === 'customer') {
+        throw new Error("Vui lòng đăng ký tài khoản thành viên (member) trước khi tham gia cộng tác luật sư.");
+      }
+      // If user is 'member', we allow them to proceed to upgrade
+      console.log("Upgrading member to collaborator lawyer:", email);
+    } else {
+      // Nếu user đã tồn tại nhưng chưa verified, cập nhật lại thông tin
+      user.fullname = fullname;
+      user.password = hashedPassword;
+      user.phone = phone;
+      user.otp = otp;
+      user.role = "lawyer"; // Đảm bảo role đúng
+      await user.save();
     }
-    // Nếu user đã tồn tại nhưng chưa verified, cập nhật lại thông tin
-    user.fullname = fullname;
-    user.password = hashedPassword;
-    user.phone = phone;
-    user.otp = otp;
-    user.role = "lawyer"; // Đảm bảo role đúng
-    await user.save();
   } else {
     // Nếu chưa có user, tạo mới User trước
     user = await userModel.create({
@@ -60,6 +69,7 @@ const lawyerRegister = async (userData) => {
     lawyerProfile.firmName = firmName;
     lawyerProfile.lawyerCardImage = lawyerCardImage;
     lawyerProfile.avatar = avatar;
+    if (bankInfo) lawyerProfile.bankInfo = bankInfo;
     await lawyerProfile.save();
     await client.del(`lawyer_detail:${user._id}`);
   } else {
@@ -70,8 +80,18 @@ const lawyerRegister = async (userData) => {
       specialty,
       firmName,
       lawyerCardImage,
-      avatar
+      avatar,
+      isCollaborator: user.isVerified && user.role === 'member', // Set collaborated if upgrading from member
+      commissionRate: (user.isVerified && user.role === 'member') ? 20 : 0, // Default 20% commission for platform
+      bankInfo
     });
+
+    // Nếu đang upgrade từ member, cập nhật role User sang lawyer ngay
+    if (user.isVerified && user.role === 'member') {
+      user.role = 'lawyer';
+      user.isApproved = false;
+      await user.save();
+    }
   }
 
   // 3. Gửi Email

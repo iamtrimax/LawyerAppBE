@@ -2,6 +2,7 @@ const cron = require("node-cron");
 const Parser = require("rss-parser");
 const legalResourceModel = require("../model/legalResource.model");
 const { invalidateResourceCache } = require("./legalResource.services");
+const { syncVbplData } = require("./vbpl.service");
 
 const parser = new Parser();
 
@@ -112,11 +113,14 @@ const syncEnglishLaws = async () => {
  * Khởi chạy Cron Job: Chạy vào lúc 01:00 sáng mỗi ngày
  */
 const initLegalSyncCron = () => {
+    // ... (Cleaned up)
+
     // Chạy hàng ngày lúc 1 giờ sáng
     cron.schedule("0 1 * * *", async () => {
         console.log("-----------------------------------------");
         console.log("Bắt đầu tiến trình cập nhật dữ liệu pháp luật THẬT hàng ngày...");
         await syncEnglishLaws();
+        await syncVbplData(); // Add VBPL sync
         console.log("-----------------------------------------");
     });
 

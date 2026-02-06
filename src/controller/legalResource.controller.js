@@ -2,10 +2,11 @@ const legalResourceServices = require("../services/legalResource.services");
 
 const getResourcesController = async (req, res) => {
     try {
-        const { category, language, page, limit } = req.query;
+        const { category, language, page, limit, search } = req.query;
         const result = await legalResourceServices.getResources({
             category,
             language,
+            search,
             page: parseInt(page) || 1,
             limit: parseInt(limit) || 10
         });

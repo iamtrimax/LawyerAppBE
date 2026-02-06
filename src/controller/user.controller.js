@@ -3,7 +3,7 @@ const { userRegister, verifyEmail, userLogin, searchLawyerByCategory, getLawyerS
 const generateToken = require("../utils/generateToken");
 
 const userRegisterController = async (req, res) => {
-  const { fullname, email, password, phone } = req.body;
+  const { fullname, email, password, phone, role } = req.body;
   // Logic để đăng ký người dùng
   if (!fullname || !email || !password) {
     return res
@@ -11,7 +11,7 @@ const userRegisterController = async (req, res) => {
       .json({ error: "Vui lòng cung cấp đầy đủ thông tin" });
   }
   try {
-    const newUser = await userRegister({ fullname, email, password, phone });
+    const newUser = await userRegister({ fullname, email, password, phone, role });
     res.status(201).json({
       message: "Người dùng đã được đăng ký thành công",
       userId: newUser._id,

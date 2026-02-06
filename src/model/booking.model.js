@@ -33,6 +33,19 @@ const bookingSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    commissionAmount: {
+        type: Number,
+        default: 0
+    },
+    lawyerPayoutAmount: {
+        type: Number,
+        default: 0
+    },
+    payoutStatus: {
+        type: String,
+        enum: ['Pending', 'Paid', 'N/A'],
+        default: 'N/A'
+    },
     addressMeeting: {
         type: String,
         default: ''

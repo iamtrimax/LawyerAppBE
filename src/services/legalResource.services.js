@@ -4,12 +4,13 @@ const client = require("../config/redis");
 /**
  * Lấy danh sách tài liệu tiếng Anh theo chuyên mục
  */
-const getResources = async ({ category, language = 'English', page = 1, limit = 10 }) => {
+const getResources = async ({ category, language = 'English', page = 1, limit = 10, search }) => {
     const skip = (page - 1) * limit;
     const query = { language, isPublished: true };
     if (category) query.category = category;
+    if (search) query.title = { $regex: search, $options: 'i' };
 
-    const cacheKey = `legal_resources:${language}:${category || 'all'}:${page}:${limit}`;
+    const cacheKey = `legal_resources:${language}:${category || 'all'}:${page}:${limit}:${search || 'none'}`;
     const cached = await client.get(cacheKey);
     if (cached) return JSON.parse(cached);
 

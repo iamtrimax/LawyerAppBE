@@ -29,5 +29,18 @@ const lawyerSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isCollaborator: {
+    type: Boolean,
+    default: false,
+  },
+  commissionRate: {
+    type: Number,
+    default: 0, // % nền tảng giữ lại
+  },
+  bankInfo: {
+    bankName: String,
+    accountNumber: String,
+    accountName: String,
+  },
 });
 module.exports = mongoose.model("Lawyer", lawyerSchema);

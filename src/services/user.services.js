@@ -7,7 +7,7 @@ const sendEmail = require("../utils/sendEmail");
 const bcrypt = require("bcryptjs");
 const client = require("../config/redis");
 const userRegister = async (userData) => {
-  const { email, fullname, password, phone } = userData;
+  const { email, fullname, password, phone, role } = userData;
   const userExists = await userModel.findOne({ email });
 
   const salt = await bcrypt.genSalt(10);
@@ -23,6 +23,7 @@ const userRegister = async (userData) => {
     userExists.password = hashedPassword;
     userExists.phone = phone;
     userExists.otp = otp;
+    if (role) userExists.role = role;
     await userExists.save();
     sendEmail(email, "Xác minh tài khoản", `Mã OTP của bạn là: ${otp}`);
     return userExists;
@@ -34,6 +35,7 @@ const userRegister = async (userData) => {
     password: hashedPassword,
     phone,
     otp,
+    role: role || 'customer'
   });
 
   sendEmail(email, "Xác minh tài khoản", `Mã OTP của bạn là: ${otp}`);
@@ -79,18 +81,16 @@ const verifyEmail = async (email, otp) => {
 const userLogin = async (userData) => {
   const { email, password, role } = userData;
 
-  // 1. Tìm User theo email trước (áp dụng cho cả lawyer và customer)
-  const user = await userModel.findOne({ email });
-  if (!user) throw new Error("Email hoặc mật khẩu không đúng");
+  // 1. Tìm User theo cả email và role để đảm bảo đăng nhập đúng cổng
+  const user = await userModel.findOne({ email, role });
+  if (!user) throw new Error("Email hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
 
-  // 2. Kiểm tra mật khẩu ngay
+  // 2. Kiểm tra mật khẩu
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) throw new Error("Email hoặc mật khẩu không đúng");
 
   // 3. Xử lý riêng cho Lawyer
   if (role === "lawyer") {
-    if (user.role !== "lawyer") throw new Error("Tài khoản không có quyền truy cập này");
-
     // Tìm profile luật sư dựa trên ID của user vừa tìm được
     const lawyerProfile = await lawyerModel.findOne({ userID: user._id });
 
@@ -108,23 +108,22 @@ const userLogin = async (userData) => {
       fullname: user.fullname,
       email: user.email,
       role: "lawyer",
-      isApproved: lawyerProfile.isApproved, // Chắc chắn sẽ có vì tìm đúng lawyerProfile của user này
+      isApproved: lawyerProfile.isApproved,
       profileId: lawyerProfile._id,
-      avatar: lawyerProfile.avatar // Thêm avatar nếu cần
+      avatar: lawyerProfile.avatar
     };
 
     return { userRes, accessToken, refreshToken };
 
   } else {
-    // 4. Đối với Customer
-    if (user.role !== "customer") throw new Error("Email hoặc mật khẩu không đúng");
-
+    // 4. Đối với các vai trò khác (customer, member, admin)
+    // Đã lọc theo role ở bước findOne nên không cần kiểm tra lại user.role ở đây
     const accessToken = generateToken(user, "7d");
     const refreshToken = generateToken(user, "14d");
 
     const userRes = user.toObject();
-    delete userRes.password;
     delete userRes.refreshTokens;
+    delete userRes.otp;
 
     return { userRes, accessToken, refreshToken };
   }

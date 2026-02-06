@@ -4,12 +4,13 @@ const client = require("../config/redis");
 /**
  * Lấy danh sách văn bản mẫu
  */
-const getForms = async ({ category, page = 1, limit = 10 }) => {
+const getForms = async ({ category, page = 1, limit = 10, search }) => {
     const skip = (page - 1) * limit;
     const query = {};
     if (category) query.category = category;
+    if (search) query.name = { $regex: search, $options: 'i' };
 
-    const cacheKey = `legal_forms:${category || 'all'}:${page}:${limit}`;
+    const cacheKey = `legal_forms:${category || 'all'}:${page}:${limit}:${search || 'none'}`;
     const cached = await client.get(cacheKey);
     if (cached) return JSON.parse(cached);
 
@@ -143,6 +144,16 @@ const invalidateFormCache = async (category) => {
     }
 };
 
+/**
+ * Tìm kiếm văn bản mẫu bằng text index
+ */
+const searchForms = async (textQuery) => {
+    if (!textQuery) return [];
+    return await legalFormModel.find({
+        $text: { $search: textQuery }
+    }).sort({ score: { $meta: "textScore" } }).limit(20).lean();
+};
+
 module.exports = {
     getForms,
     getFormDetail,
@@ -152,5 +163,6 @@ module.exports = {
     deleteForm,
     getLawyerForms,
     updateLawyerForm,
-    deleteLawyerForm
+    deleteLawyerForm,
+    searchForms
 };
