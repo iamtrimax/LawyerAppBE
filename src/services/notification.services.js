@@ -36,9 +36,9 @@ const sendPushNotification = async (pushToken, title, body, data = {}) => {
 
 /**
  * Gửi thông báo kép (Email + Push)
- * @param {object} user - Đối tượng User (có email và expoPushToken)
+  * @param {object} user - Đối tượng User (có email và expoPushToken)
  * @param {string} title 
- * @param {string} body 
+ * @param {string} body
  */
 const sendUnifiedNotification = async (user, title, body, data = {}) => {
     const tasks = [];

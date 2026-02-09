@@ -1,7 +1,7 @@
 const express = require("express");
 const { userRegisterController, verifyEmailController, loginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController } = require("../controller/user.controller");
 const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController } = require("../controller/lawyer.controller");
-const verifyAccessToken = require("../../middleware/VerifyAccessToken");
+const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
 const { aprroveLawyerController } = require("../controller/admin.controller");
 const verifyLawyer = require("../../middleware/verifyLawyer");
