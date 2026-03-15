@@ -27,14 +27,14 @@ const cosineSimilarity = (vecA, vecB) => {
  */
 const aiSearch = async (query) => {
     try {
-        console.time("TotalSearchTime");
+        const startTime = Date.now();
 
         // 0. CHECK CACHE
         const cacheKey = `search_${query.toLowerCase().trim()}`;
         const cachedResult = searchCache.get(cacheKey);
         if (cachedResult) {
             console.log("🚀 Serving from Cache");
-            console.timeEnd("TotalSearchTime");
+            console.log(`TotalSearchTime: ${Date.now() - startTime}ms`);
             return cachedResult;
         }
 
@@ -49,7 +49,7 @@ const aiSearch = async (query) => {
         let articles = [];
 
         if (queryEmbedding) {
-            console.time("VectorRanking");
+            const vectorStartTime = Date.now();
             console.log("Using Vector Search...");
 
             // OPTIMIZATION: Fetch ONLY _id and embedding first to minimize data transfer
@@ -80,7 +80,7 @@ const aiSearch = async (query) => {
                     return { ...art._doc, similarity: rank ? rank.similarity : 0 };
                 }).sort((a, b) => b.similarity - a.similarity);
             }
-            console.timeEnd("VectorRanking");
+            console.log(`VectorRanking: ${Date.now() - vectorStartTime}ms`);
         }
 
         // FALLBACK: If vector search yields no results, use Text Search
@@ -165,7 +165,7 @@ TRẢ LỜI:
             }
         }
 
-        console.timeEnd("TotalSearchTime");
+        console.log(`TotalSearchTime: ${Date.now() - startTime}ms`);
 
         const finalResult = {
             answer: answer.trim(),
