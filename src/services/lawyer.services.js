@@ -214,6 +214,40 @@ const confirmBookingPayment = async (lawyerId, bookingId) => {
   return booking;
 }
 
+const updateLawyerProfile = async (userId, lawyerId, updateData) => {
+  const { fullname, phone, avatar, specialty, firmName, bankInfo } = updateData;
+
+  // 1. Cập nhật bảng User
+  if (fullname || phone) {
+    await userModel.findByIdAndUpdate(userId, {
+      ...(fullname && { fullname }),
+      ...(phone && { phone })
+    });
+  }
+
+  // 2. Cập nhật bảng Lawyer
+  const lawyerUpdate = {};
+  if (avatar) lawyerUpdate.avatar = avatar;
+  if (specialty) lawyerUpdate.specialty = specialty;
+  if (firmName) lawyerUpdate.firmName = firmName;
+  if (bankInfo) lawyerUpdate.bankInfo = bankInfo;
+  if (Object.keys(lawyerUpdate).length > 0) {
+    lawyerUpdate.isApproved = false;
+    await lawyerModel.findByIdAndUpdate(lawyerId, lawyerUpdate);
+  }
+
+  // 3. Xóa cache
+  await client.del(`lawyer_detail:${userId}`);
+  // Xóa các cache tìm kiếm luật sư (vì specialty có thể đã thay đổi)
+  const keys = await client.keys("lawyer_search:*");
+  if (keys.length > 0) {
+    await Promise.all(keys.map(key => client.del(key)));
+  }
+
+  // 4. Trả về dữ liệu mới nhất (phẳng hóa)
+  return await getUserDetail(userId);
+};
+
 module.exports = {
   lawyerRegister,
   getUserDetail,
@@ -221,5 +255,6 @@ module.exports = {
   getMySchedule,
   getLawyerBookings,
   getLawyerBookingDetail,
-  confirmBookingPayment
+  confirmBookingPayment,
+  updateLawyerProfile
 };

@@ -1,4 +1,4 @@
-const { lawyerRegister, getUserDetail, updateSchedule, getMySchedule, getLawyerBookings, getLawyerBookingDetail, confirmBookingPayment } = require("../services/lawyer.services");
+const { lawyerRegister, getUserDetail, updateSchedule, getMySchedule, getLawyerBookings, getLawyerBookingDetail, confirmBookingPayment, updateLawyerProfile } = require("../services/lawyer.services");
 const client = require("../config/redis");
 
 const lawyerRegisterController = async (req, res) => {
@@ -187,6 +187,28 @@ const confirmBookingPaymentController = async (req, res) => {
   }
 };
 
+const updateLawyerProfileController = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const lawyerId = req.lawyer._id;
+    const updateData = req.body;
+
+    const updatedLawyer = await updateLawyerProfile(userId, lawyerId, updateData);
+
+    res.status(200).json({
+      success: true,
+      message: "Cập nhật hồ sơ luật sư thành công",
+      lawyer: updatedLawyer
+    });
+  } catch (error) {
+    console.error("Lỗi tại updateLawyerProfileController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ"
+    });
+  }
+};
+
 module.exports = {
   lawyerRegisterController,
   getLawyerDetailController,
@@ -194,5 +216,6 @@ module.exports = {
   getMyScheduleController,
   getLawyerBookingsController,
   getLawyerBookingDetailController,
-  confirmBookingPaymentController
+  confirmBookingPaymentController,
+  updateLawyerProfileController
 };

@@ -1,10 +1,11 @@
 const express = require("express");
 const { userRegisterController, verifyEmailController, loginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController } = require("../controller/user.controller");
-const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController } = require("../controller/lawyer.controller");
+const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController } = require("../controller/lawyer.controller");
 const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
 const { aprroveLawyerController } = require("../controller/admin.controller");
 const verifyLawyer = require("../../middleware/verifyLawyer");
+const rateLimiter = require("../../middleware/rateLimiter");
 const { handleSePayWebhookController, createPaymentLinkController } = require("../controller/payment.controller");
 const {
     createArticleController,
@@ -47,7 +48,15 @@ const {
 
 const router = express.Router();
 
-// Định nghĩa các route ở đây
+// 1. Định nghĩa các mức Rate Limit khác nhau
+const globalLimiter = rateLimiter({ prefix: "global", max: 100 });
+const authLimiter = rateLimiter({ prefix: "auth", max: 5, windowMs: 60000 * 5 }); // 5 lần/5 phút cho login/register/forgot-password
+const paymentLimiter = rateLimiter({ prefix: "payment", max: 3, windowMs: 60000 }); // 3 lần/phút cho tạo link thanh toán
+
+// 2. Áp dụng Rate Limiting global mặc định cho tất cả route
+router.use(globalLimiter);
+
+// 3. Định nghĩa các route
 
 // article routes
 router.get("/articles/ai-search", aiSearchController);
@@ -60,9 +69,9 @@ router.delete("/articles/delete/:id", verifyAccessToken, verifyLawyer, deleteArt
 router.post("/articles/:id/download", verifyAccessToken, trackArticleDownloadController);
 
 //user routes
-router.post("/register", userRegisterController);
+router.post("/register", authLimiter, userRegisterController);
 router.post("/verify-email", verifyEmailController);
-router.post("/login", loginController);
+router.post("/login", authLimiter, loginController);
 router.post("/update-token", updateToken);
 router.get("/search-lawyer", searchLawyerByCategoryController)
 router.get("/schedule/:lawyerId", getLawyerScheduleByIdController);
@@ -71,9 +80,9 @@ router.get("/booking/list", verifyAccessToken, getUserBookingsController);
 router.get("/booking/detail/:bookingId", verifyAccessToken, getBookingDetailController);
 router.put("/profile", verifyAccessToken, updateUserProfileController);
 router.post("/change-password", verifyAccessToken, changePasswordController);
-router.post("/forgot-password/check-email", checkAccountExistsController);
+router.post("/forgot-password/check-email", authLimiter, checkAccountExistsController);
 router.post("/forgot-password/verify-otp", verifyForgotPasswordOTPController);
-router.post("/forgot-password/reset", resetPasswordController);
+router.post("/forgot-password/reset", authLimiter, resetPasswordController);
 router.post("/booking/cancel/:bookingId", verifyAccessToken, cancelBookingController);
 
 // English Legal Data (Feature 3)
@@ -89,13 +98,14 @@ router.get("/legal-forms/view/:id.png", viewFileController);
 router.post("/legal-forms/:id/download", verifyAccessToken, trackDownloadController);
 
 // lawyer routes
-router.post("/lawyer/register", lawyerRegisterController)
+router.post("/lawyer/register", authLimiter, lawyerRegisterController)
 router.post("/lawyer/update-schedule", verifyAccessToken, verifyLawyer, updateScheduleController);
 router.get("/lawyer/detail", verifyAccessToken, verifyLawyer, getLawyerDetailController);
 router.get("/lawyer/schedule", verifyAccessToken, verifyLawyer, getMyScheduleController);
 router.get("/lawyer/bookings", verifyAccessToken, verifyLawyer, getLawyerBookingsController);
 router.get("/lawyer/booking-detail/:bookingId", verifyAccessToken, verifyLawyer, getLawyerBookingDetailController);
 router.put("/lawyer/booking/confirm-payment/:bookingId", verifyAccessToken, verifyLawyer, confirmBookingPaymentController);
+router.put("/lawyer/profile", verifyAccessToken, verifyLawyer, updateLawyerProfileController);
 
 // lawyer legal forms management
 router.post("/lawyer/forms/create", verifyAccessToken, verifyLawyer, createLawyerFormController);
@@ -104,7 +114,7 @@ router.put("/lawyer/forms/update/:id", verifyAccessToken, verifyLawyer, updateMy
 router.delete("/lawyer/forms/delete/:id", verifyAccessToken, verifyLawyer, deleteMyFormController);
 
 // admin routes
-router.post("/approve-lawyer/:lawyerId", verifyAccessToken, verifyAdmin, aprroveLawyerController);
+router.post("/approve-lawyer/*lawyerId", verifyAccessToken, verifyAdmin, authLimiter, aprroveLawyerController);
 
 // Admin Legal Resource Management
 router.post("/admin/legal-resources", verifyAccessToken, verifyAdmin, createResourceController);
@@ -118,7 +128,7 @@ router.delete("/admin/legal-forms/:id", verifyAccessToken, verifyAdmin, deleteFo
 
 // payment routes
 router.post("/payment/sepay-webhook", handleSePayWebhookController);
-router.post("/payment/create-url", verifyAccessToken, createPaymentLinkController);
+router.post("/payment/create-url", verifyAccessToken, paymentLimiter, createPaymentLinkController);
 
 // Chat Consultation routes
 router.post("/chat/start", verifyAccessToken, startChatController);
