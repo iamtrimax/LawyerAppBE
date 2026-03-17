@@ -1,5 +1,22 @@
-const { lawyerRegister, getUserDetail, updateSchedule, getMySchedule, getLawyerBookings, getLawyerBookingDetail, confirmBookingPayment, updateLawyerProfile } = require("../services/lawyer.services");
+const { lawyerRegister, getUserDetail, updateSchedule, getMySchedule, getLawyerBookings, getLawyerBookingDetail, confirmBookingPayment, updateLawyerProfile, getLawyers } = require("../services/lawyer.services");
 const client = require("../config/redis");
+
+const getLawyersController = async (req, res) => {
+  try {
+    const { specialization } = req.query;
+    const lawyers = await getLawyers(specialization);
+    res.status(200).json({
+      success: true,
+      data: lawyers
+    });
+  } catch (error) {
+    console.error("Lỗi tại getLawyersController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ"
+    });
+  }
+};
 
 const lawyerRegisterController = async (req, res) => {
   const {
@@ -217,5 +234,6 @@ module.exports = {
   getLawyerBookingsController,
   getLawyerBookingDetailController,
   confirmBookingPaymentController,
-  updateLawyerProfileController
+  updateLawyerProfileController,
+  getLawyersController
 };

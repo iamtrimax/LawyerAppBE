@@ -248,6 +248,36 @@ const updateLawyerProfile = async (userId, lawyerId, updateData) => {
   return await getUserDetail(userId);
 };
 
+const getLawyers = async (specialization) => {
+  const key = `lawyers_list:${specialization || 'all'}`;
+  const cached = await client.get(key);
+  if (cached) return JSON.parse(cached);
+
+  let query = { isApproved: true };
+  if (specialization && specialization !== "Tất cả") {
+    query.specialty = specialization;
+  }
+
+  const lawyers = await lawyerModel
+    .find(query)
+    .populate("userID", "fullname email phone avatar")
+    .lean();
+
+  // Phẳng hóa dữ liệu để FE dùng dễ hơn
+  const flatLawyers = lawyers.map(lawyer => ({
+    ...lawyer.userID,
+    ...lawyer,
+    _id: lawyer.userID?._id || lawyer._id,
+    profileId: lawyer._id
+  })).map(l => {
+    delete l.userID;
+    return l;
+  });
+
+  await client.set(key, JSON.stringify(flatLawyers), { EX: 600 }); // Cache trong 10 phút
+  return flatLawyers;
+};
+
 module.exports = {
   lawyerRegister,
   getUserDetail,
@@ -256,5 +286,6 @@ module.exports = {
   getLawyerBookings,
   getLawyerBookingDetail,
   confirmBookingPayment,
-  updateLawyerProfile
+  updateLawyerProfile,
+  getLawyers
 };

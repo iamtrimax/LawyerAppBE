@@ -1,6 +1,6 @@
 const express = require("express");
 const { userRegisterController, verifyEmailController, loginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController } = require("../controller/user.controller");
-const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController } = require("../controller/lawyer.controller");
+const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController, getLawyersController } = require("../controller/lawyer.controller");
 const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
 const { aprroveLawyerController } = require("../controller/admin.controller");
@@ -98,6 +98,7 @@ router.get("/legal-forms/view/:id.png", viewFileController);
 router.post("/legal-forms/:id/download", verifyAccessToken, trackDownloadController);
 
 // lawyer routes
+router.get("/lawyers", getLawyersController);
 router.post("/lawyer/register", authLimiter, lawyerRegisterController)
 router.post("/lawyer/update-schedule", verifyAccessToken, verifyLawyer, updateScheduleController);
 router.get("/lawyer/detail", verifyAccessToken, verifyLawyer, getLawyerDetailController);
