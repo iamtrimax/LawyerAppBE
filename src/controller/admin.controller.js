@@ -1,3 +1,4 @@
+const { default: Expo } = require("expo-server-sdk");
 const { approveLawyer, getLawyerDetailForAdmin } = require("../services/admin.services");
 
 let expo = new Expo();
