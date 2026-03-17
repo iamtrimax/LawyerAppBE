@@ -15,4 +15,11 @@ const approveLawyer = async (lawyerId) => {
   }
   return lawyerProfile;
 };
-module.exports = { approveLawyer };
+const getLawyerDetailForAdmin = async (lawyerId) => {
+  const lawyerProfile = await lawyerModel
+    .findOne({ lawyerId: lawyerId })
+    .populate("userID", "-password -otp -refreshTokens");
+  return lawyerProfile;
+};
+
+module.exports = { approveLawyer, getLawyerDetailForAdmin };

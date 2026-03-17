@@ -3,7 +3,7 @@ const { userRegisterController, verifyEmailController, loginController, updateTo
 const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController, getLawyersController } = require("../controller/lawyer.controller");
 const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
-const { aprroveLawyerController } = require("../controller/admin.controller");
+const { aprroveLawyerController, getLawyerDetailForAdminController } = require("../controller/admin.controller");
 const verifyLawyer = require("../../middleware/verifyLawyer");
 const rateLimiter = require("../../middleware/rateLimiter");
 const { handleSePayWebhookController, createPaymentLinkController } = require("../controller/payment.controller");
@@ -116,6 +116,7 @@ router.delete("/lawyer/forms/delete/:id", verifyAccessToken, verifyLawyer, delet
 
 // admin routes
 router.post("/approve-lawyer/*lawyerId", verifyAccessToken, verifyAdmin, authLimiter, aprroveLawyerController);
+router.get("/admin/lawyer-detail/:lawyerId", verifyAccessToken, verifyAdmin, getLawyerDetailForAdminController);
 
 // Admin Legal Resource Management
 router.post("/admin/legal-resources", verifyAccessToken, verifyAdmin, createResourceController);

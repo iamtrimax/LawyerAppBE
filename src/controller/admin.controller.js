@@ -1,7 +1,30 @@
-const { Expo } = require("expo-server-sdk");
-const { approveLawyer } = require("../services/admin.services");
+const { approveLawyer, getLawyerDetailForAdmin } = require("../services/admin.services");
 
 let expo = new Expo();
+
+const getLawyerDetailForAdminController = async (req, res) => {
+  const { lawyerId } = req.params;
+  try {
+    const lawyerProfile = await getLawyerDetailForAdmin(lawyerId);
+    if (!lawyerProfile) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy thông tin luật sư",
+      });
+    }
+    res.status(200).json({
+      success: true,
+      data: lawyerProfile,
+    });
+  } catch (error) {
+    console.error("Lỗi tại getLawyerDetailForAdminController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
 const aprroveLawyerController = async (req, res) => {
   const { lawyerId } = req.params;
   try {
@@ -46,4 +69,4 @@ const aprroveLawyerController = async (req, res) => {
     return res.status(400).json({ message: error.message });
   }
 };
-module.exports = { aprroveLawyerController };
+module.exports = { aprroveLawyerController, getLawyerDetailForAdminController };
