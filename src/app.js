@@ -9,6 +9,7 @@ const http = require('http');
 const { initSocket } = require('./config/socket');
 const { initReminderCron } = require('./services/reminder.cron');
 const { initLegalSyncCron } = require('./services/legalSync.cron');
+const { initializeVectorCache } = require('./services/aiSearch.service');
 
 app.use(cors());
 app.use(express.json()); // Cho phép nhận JSON body
@@ -27,6 +28,8 @@ connectMongoDb().then(() => {
     const port = process.env.PORT || 3000;
     server.listen(port, '0.0.0.0', () => {
         console.log(`Server đang chạy tại port ${port}`);
+        // Tải Vector Cache sau khi kết nối DB và server đã lắng nghe
+        initializeVectorCache().catch(err => console.error("Initial Cache Load Failed:", err));
     });
 }).catch((error) => {
     console.error('Không thể kết nối đến cơ sở dữ liệu:', error);

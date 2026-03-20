@@ -7,8 +7,16 @@ const articleSchema = new mongoose.Schema({
         trim: true
     },
     content: {
-        type: String, // Rich text (HTML) content
+        type: String, // Full content (HTML if requested)
         required: true
+    },
+    textContent: {
+        type: String, // Plain text for AI/Search
+        required: false
+    },
+    htmlContent: {
+        type: String, // HTML content
+        required: false
     },
     author: {
         type: mongoose.Schema.Types.ObjectId,
@@ -41,7 +49,14 @@ const articleSchema = new mongoose.Schema({
         enum: [
             'Hiến pháp', 'Bộ luật', 'Luật', 'Pháp lệnh', 'Lệnh',
             'Nghị quyết', 'Nghị quyết liên tịch', 'Nghị định',
-            'Quyết định', 'Thông tư', 'Thông tư liên tịch', 'Khác'
+            'Quyết định', 'Thông tư', 'Thông tư liên tịch', 'Khác',
+            // Danh mục tùy chỉnh cho văn bản đất đai
+            'Chính sách & Quy định chung',
+            'Bồi thường & Giải phóng mặt bằng',
+            'Giá đất & Nghĩa vụ tài chính',
+            'Thủ tục hành chính & Cấp sổ đỏ',
+            'Quy hoạch & Kế hoạch sử dụng đất',
+            'Xử phạt & Thanh tra'
         ]
     },
     tags: [{

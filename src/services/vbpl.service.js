@@ -2,6 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const articleModel = require('../model/article.model');
 const { generateEmbedding } = require('./embedding.service');
+const { updateVectorCache } = require('./aiSearch.service');
 
 // Base URL for constructing absolute links
 const BASE_URL = 'https://vbpl.vn';
@@ -268,11 +269,14 @@ const syncVbplData = async () => {
                     try {
                         const details = await parseDocumentDetails(doc.url, doc.title, categoryName);
                         if (details) {
-                            await articleModel.findOneAndUpdate(
+                            const updatedDoc = await articleModel.findOneAndUpdate(
                                 { sourceUrl: doc.url },
                                 { $set: details },
                                 { upsert: true, new: true }
                             );
+                            if (updatedDoc && updatedDoc.embedding) {
+                                updateVectorCache(updatedDoc._id, updatedDoc.embedding);
+                            }
                             totalSaved++;
                         }
                         await new Promise(r => setTimeout(r, 200));

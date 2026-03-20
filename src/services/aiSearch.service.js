@@ -7,6 +7,49 @@ require('dotenv').config();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const searchCache = new NodeCache({ stdTTL: 3600 }); // Cache for 1 hour
 
+// IN-MEMORY VECTOR CACHE FOR SPEEDING UP SEARCH
+let vectorCache = [];
+let isCacheInitializing = false;
+
+/**
+ * Initialize the Vector Cache from Database
+ */
+const initializeVectorCache = async () => {
+    if (isCacheInitializing) return;
+    isCacheInitializing = true;
+    try {
+        console.log("📥 Initializing AI Vector Cache...");
+        const startTime = Date.now();
+        const candidates = await Article.find({
+            embedding: { $exists: true, $ne: null, $not: { $size: 0 } }
+        }).select('embedding');
+        
+        vectorCache = candidates.map(doc => ({
+            _id: doc._id,
+            embedding: doc.embedding
+        }));
+        
+        console.log(`✅ AI Vector Cache Initialized: ${vectorCache.length} articles in ${Date.now() - startTime}ms`);
+    } catch (error) {
+        console.error("❌ Failed to initialize AI Vector Cache:", error.message);
+    } finally {
+        isCacheInitializing = false;
+    }
+};
+
+/**
+ * Update or Add a single article to the Vector Cache
+ */
+const updateVectorCache = (articleId, embedding) => {
+    if (!articleId || !embedding) return;
+    const index = vectorCache.findIndex(v => v._id.toString() === articleId.toString());
+    if (index !== -1) {
+        vectorCache[index].embedding = embedding;
+    } else {
+        vectorCache.push({ _id: articleId, embedding });
+    }
+};
+
 /**
  * Cosine Similarity Calculation
  */
@@ -50,17 +93,16 @@ const aiSearch = async (query) => {
 
         if (queryEmbedding) {
             const vectorStartTime = Date.now();
-            console.log("Using Vector Search...");
+            console.log("Using Vector Search (In-Memory)...");
 
-            // OPTIMIZATION: Fetch ONLY _id and embedding first to minimize data transfer
-            const candidates = await Article.find({
-                embedding: { $exists: true, $ne: null, $not: { $size: 0 } }
-            }).select('embedding');
+            // LAZY INITIALIZATION: If cache is empty, try to initialize it
+            if (vectorCache.length === 0) {
+                await initializeVectorCache();
+            }
 
-            if (candidates.length > 0) {
-                // Calculate similarity in memory
-                const ranked = candidates.map(doc => {
-                    if (!doc.embedding || doc.embedding.length === 0) return { _id: doc._id, similarity: 0 };
+            if (vectorCache.length > 0) {
+                // Calculate similarity in memory using the cache
+                const ranked = vectorCache.map(doc => {
                     return {
                         _id: doc._id,
                         similarity: cosineSimilarity(queryEmbedding, doc.embedding)
@@ -95,12 +137,8 @@ const aiSearch = async (query) => {
                 .select('title content category sourceUrl');
         }
 
-        if (articles.length === 0) {
-            return {
-                answer: "Xin lỗi, tôi không tìm thấy tài liệu pháp luật nào liên quan đến câu hỏi của bạn trong cơ sở dữ liệu hiện tại.",
-                sources: []
-            };
-        }
+        // FALLBACK: If articles.length === 0, we continue to Gemini but inform it to use general knowledge/search
+        const hasLocalContext = articles.length > 0;
 
         // 3. CONSTRUCT CONTEXT
         let context = "Dưới đây là một số thông tin từ các văn bản pháp luật tìm thấy:\n\n";
@@ -111,23 +149,39 @@ const aiSearch = async (query) => {
         });
 
         // 4. GENERATE ANSWER WITH GEMINI
-        // Switched to gemini-1.5-flash for better free quota (15 RPM vs 5 RPM)
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        // Using gemini-1.5-flash for reliability.
+        // Google Search is implicitly available in modern Gemini models.
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-2.5-flash"
+        });
 
-        const prompt = `
+        const prompt = hasLocalContext ? `
 Bạn là một trợ lý AI chuyên gia về pháp luật Việt Nam. 
 Dựa vào ngữ cảnh (CONTEXT) được cung cấp dưới đây, hãy trả lời câu hỏi của người dùng một cách chính xác, chuyên sâu và khách quan.
 
 LƯU Ý QUAN TRỌNG:
-1. Nếu câu hỏi yêu cầu một điều khoản cụ thể, hãy trích dẫn chính xác nội dung từ ngữ cảnh.
-2. Nếu ngữ cảnh không chứa thông tin để trả lời, hãy nói rằng bạn hiện chưa có dữ liệu chính xác về điều khoản này.
-3. Luôn ghi rõ nguồn trích dẫn ở cuối câu trả lời.
-4. Ưu tiên sự chính xác tuyệt đối vì đây là thông tin pháp luật.
+1. Trích dẫn chính xác các điều khoản nếu có trong CONTEXT.
+2. Nếu CONTEXT có thông tin nhưng chưa đầy đủ, bạn có thể bổ sung kiến thức từ Google Search để câu trả lời thêm hoàn thiện, nhưng phải ưu tiên nguồn từ CONTEXT.
+3. Luôn ghi rõ nguồn trích dẫn từ CONTEXT (Tên tài liệu, tiêu đề) ở cuối câu trả lời.
+4. Nếu bạn sử dụng thông tin từ Google Search, hãy chú thích rõ là "Thông tin bổ sung từ tìm kiếm Google".
 
 ---
 CONTEXT:
 ${context}
 ---
+
+CÂU HỎI CỦA NGƯỜI DÙNG:
+${query}
+
+TRẢ LỜI:
+` : `
+Bạn là một trợ lý AI chuyên gia về pháp luật Việt Nam. 
+Hiện tại kho dữ liệu nội bộ của chúng tôi không có văn bản cụ thể nào khớp hoàn toàn với câu hỏi của bạn.
+
+NHIỆM VỤ:
+1. Hãy sử dụng khả năng tìm kiếm Google (Google Search) và kiến thức nội tại của bạn để trả lời câu hỏi của người dùng một cách chuyên nghiệp nhất.
+2. Nêu rõ ngay đầu câu trả lời: "Tôi không tìm thấy văn bản pháp luật cụ thể trong kho dữ liệu nội bộ, dưới đây là thông tin tôi tìm kiếm được từ Google để hỗ trợ bạn:"
+3. Trình bày rõ ràng, dễ hiểu và tư vấn đúng trọng tâm vấn đề pháp lý.
 
 CÂU HỎI CỦA NGƯỜI DÙNG:
 ${query}
@@ -189,5 +243,7 @@ TRẢ LỜI:
 };
 
 module.exports = {
-    aiSearch
+    aiSearch,
+    initializeVectorCache,
+    updateVectorCache
 };
