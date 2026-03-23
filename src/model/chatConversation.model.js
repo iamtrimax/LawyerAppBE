@@ -15,6 +15,10 @@ const chatConversationSchema = new mongoose.Schema({
             type: Date,
             default: Date.now
         }
+    },
+    isBroadcast: {
+        type: Boolean,
+        default: false
     }
 }, { timestamps: true });
 

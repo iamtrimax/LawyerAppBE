@@ -7,7 +7,7 @@ const sendEmail = require("../utils/sendEmail");
 const bcrypt = require("bcryptjs");
 const client = require("../config/redis");
 const userRegister = async (userData) => {
-  const { email, fullname, password, phone, role } = userData;
+  const { email, fullname, password, phone, role, referralCode } = userData;
   const userExists = await userModel.findOne({ email });
 
   const salt = await bcrypt.genSalt(10);
@@ -24,9 +24,23 @@ const userRegister = async (userData) => {
     userExists.phone = phone;
     userExists.otp = otp;
     if (role) userExists.role = role;
+    if (referralCode && !userExists.referredBy) {
+      const referrer = await userModel.findOne({ phone: referralCode });
+      if (referrer) {
+        userExists.referredBy = referrer._id;
+      }
+    }
     await userExists.save();
     sendEmail(email, "Xác minh tài khoản", `Mã OTP của bạn là: ${otp}`);
     return userExists;
+  }
+
+  let referredBy = null;
+  if (referralCode) {
+    const referrer = await userModel.findOne({ phone: referralCode });
+    if (referrer) {
+      referredBy = referrer._id;
+    }
   }
 
   const newUser = await userModel.create({
@@ -35,7 +49,8 @@ const userRegister = async (userData) => {
     password: hashedPassword,
     phone,
     otp,
-    role: role || 'customer'
+    role: role || 'customer',
+    referredBy
   });
 
   sendEmail(email, "Xác minh tài khoản", `Mã OTP của bạn là: ${otp}`);
@@ -62,6 +77,16 @@ const verifyEmail = async (email, otp) => {
 
   await user.save();
 
+  // 2.1 Cộng điểm cho người giới thiệu nếu có
+  if (user.referredBy) {
+    const referrer = await userModel.findById(user.referredBy);
+    if (referrer) {
+      referrer.points += 100; // Cộng 100 điểm cho người giới thiệu
+      await referrer.save();
+      await updateUserRank(referrer._id); // Cập nhật hạng sau khi cộng điểm
+    }
+  }
+
   // 3. Nếu là luật sư, bạn có thể lấy thêm thông tin profile nếu cần
   if (user.role === "lawyer") {
     const lawyerProfile = await lawyerModel.findOne({ userID: user._id });
@@ -79,15 +104,18 @@ const verifyEmail = async (email, otp) => {
   };
 };
 const userLogin = async (userData) => {
-  const { email, password, role } = userData;
+  const { identifier, password, role } = userData;
 
-  // 1. Tìm User theo cả email và role để đảm bảo đăng nhập đúng cổng
-  const user = await userModel.findOne({ email, role });
-  if (!user) throw new Error("Email hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
+  // 1. Tìm User theo email hoặc phone và role để đảm bảo đăng nhập đúng cổng
+  const user = await userModel.findOne({
+    $or: [{ email: identifier }, { phone: identifier }],
+    role
+  });
+  if (!user) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
 
   // 2. Kiểm tra mật khẩu
   const isPasswordValid = await bcrypt.compare(password, user.password);
-  if (!isPasswordValid) throw new Error("Email hoặc mật khẩu không đúng");
+  if (!isPasswordValid) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng");
 
   // 3. Xử lý riêng cho Lawyer
   if (role === "lawyer") {
@@ -511,6 +539,44 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
   }
 };
 
+const updateUserRank = async (userId) => {
+  const user = await userModel.findById(userId);
+  if (!user) return;
+
+  let newRank = 'Bạc';
+  const points = user.points;
+
+  if (points >= 20000) {
+    newRank = 'Kim cương';
+  } else if (points >= 5000) {
+    newRank = 'Bạch kim';
+  } else if (points >= 1000) {
+    newRank = 'Vàng';
+  } else {
+    newRank = 'Bạc';
+  }
+
+  if (user.rank !== newRank) {
+    user.rank = newRank;
+    await user.save();
+  }
+};
+
+const getUserProfile = async (userId) => {
+  const user = await userModel.findById(userId).select('-password -otp -refreshTokens');
+  if (!user) {
+    throw new Error("Người dùng không tồn tại");
+  }
+  return user;
+};
+
+const getReferralHistory = async (userId) => {
+  // Tìm tất cả người dùng được giới thiệu bởi userId và đã xác thực
+  const referrals = await userModel.find({ referredBy: userId, isVerified: true })
+    .select('fullname email createdAt phone rank');
+  return referrals;
+};
+
 module.exports = {
   userRegister,
   verifyEmail,
@@ -525,5 +591,8 @@ module.exports = {
   checkAccountExists,
   verifyForgotPasswordOTP,
   resetPassword,
-  cancelBooking
+  cancelBooking,
+  updateUserRank,
+  getUserProfile,
+  getReferralHistory
 };

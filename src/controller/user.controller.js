@@ -1,9 +1,9 @@
 const userModel = require("../model/user.model");
-const { userRegister, verifyEmail, userLogin, searchLawyerByCategory, getLawyerScheduleByLawyerId, createBooking, getUserBookings, getBookingDetail, updateUserProfile, changePassword, checkAccountExists, resetPassword, verifyForgotPasswordOTP, cancelBooking } = require("../services/user.services");
+const { userRegister, verifyEmail, userLogin, searchLawyerByCategory, getLawyerScheduleByLawyerId, createBooking, getUserBookings, getBookingDetail, updateUserProfile, changePassword, checkAccountExists, resetPassword, verifyForgotPasswordOTP, cancelBooking, getUserProfile, getReferralHistory } = require("../services/user.services");
 const generateToken = require("../utils/generateToken");
 
 const userRegisterController = async (req, res) => {
-  const { fullname, email, password, phone, role } = req.body;
+  const { fullname, email, password, phone, role, referralCode } = req.body;
   // Logic để đăng ký người dùng
   if (!fullname || !email || !password) {
     return res
@@ -11,7 +11,7 @@ const userRegisterController = async (req, res) => {
       .json({ error: "Vui lòng cung cấp đầy đủ thông tin" });
   }
   try {
-    const newUser = await userRegister({ fullname, email, password, phone, role });
+    const newUser = await userRegister({ fullname, email, password, phone, role, referralCode });
     res.status(201).json({
       message: "Người dùng đã được đăng ký thành công",
       userId: newUser._id,
@@ -31,12 +31,14 @@ const verifyEmailController = async (req, res) => {
   });
 };
 const loginController = async (req, res) => {
-  const { email, password, role } = req.body;
-  if (!email || !password || !role) {
-    return res.status(400).json({ error: "Vui lòng cung cấp đầy đủ thông tin" });
+  const { email, phone, password, role } = req.body;
+  const identifier = email || phone;
+
+  if (!identifier || !password || !role) {
+    return res.status(400).json({ error: "Vui lòng cung cấp đầy đủ thông tin (Email/Số điện thoại, mật khẩu và vai trò)" });
   }
   try {
-    const user = await userLogin({ email, password, role });
+    const user = await userLogin({ identifier, password, role });
     res.status(200).json({
       message: "Đăng nhập thành công",
       user: { ...user.userRes },
@@ -321,6 +323,40 @@ const cancelBookingController = async (req, res) => {
   }
 };
 
+const getUserProfileController = async (req, res) => {
+  const userId = req.userId;
+  try {
+    const user = await getUserProfile(userId);
+    res.status(200).json({
+      success: true,
+      data: user
+    });
+  } catch (error) {
+    console.error("Lỗi tại getUserProfileController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ"
+    });
+  }
+};
+
+const getReferralHistoryController = async (req, res) => {
+  const userId = req.userId;
+  try {
+    const referrals = await getReferralHistory(userId);
+    res.status(200).json({
+      success: true,
+      data: referrals
+    });
+  } catch (error) {
+    console.error("Lỗi tại getReferralHistoryController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ"
+    });
+  }
+};
+
 module.exports = {
   userRegisterController,
   verifyEmailController,
@@ -336,5 +372,7 @@ module.exports = {
   checkAccountExistsController,
   resetPasswordController,
   verifyForgotPasswordOTPController,
-  cancelBookingController
+  cancelBookingController,
+  getUserProfileController,
+  getReferralHistoryController
 };

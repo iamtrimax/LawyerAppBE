@@ -46,7 +46,10 @@ const lawyerRegisterController = async (req, res) => {
 
   const missingFields = [];
   Object.keys(requiredFields).forEach((field) => {
-    if (!req.body[field] || req.body[field].toString().trim() === "") {
+    const value = req.body[field];
+    if (Array.isArray(value)) {
+      if (value.length === 0) missingFields.push(requiredFields[field]);
+    } else if (!value || value.toString().trim() === "") {
       missingFields.push(requiredFields[field]);
     }
   });

@@ -29,16 +29,42 @@ const saveMessage = async ({ conversationID, senderID, text, attachments }) => {
         attachments: attachments || []
     });
 
-    // Cập nhật lastMessage trong conversation
+    // Cập nhật lastMessage và thêm senderID vào participants nếu chưa có
     await chatConversationModel.findByIdAndUpdate(conversationID, {
-        lastMessage: {
-            text,
-            senderID,
-            createdAt: message.createdAt
+        $set: {
+            lastMessage: {
+                text,
+                senderID,
+                createdAt: message.createdAt
+            }
+        },
+        $addToSet: {
+            participants: senderID
         }
     });
 
     return message;
+};
+
+/**
+ * Lấy danh sách câu hỏi chung (broadcast)
+ */
+const getBroadcastConversations = async () => {
+    return await chatConversationModel.find({ isBroadcast: true })
+        .populate('participants', 'fullname avatar role')
+        .populate('lastMessage.senderID', 'fullname avatar role expoPushToken')
+        .sort({ updatedAt: -1 })
+        .lean();
+};
+
+/**
+ * Xử lý tạo tin nhắn chung (broadcast chat)
+ */
+const createBroadcastConversation = async (userID) => {
+    return await chatConversationModel.create({
+        participants: [userID],
+        isBroadcast: true
+    });
 };
 
 /**
@@ -49,6 +75,7 @@ const getConversationList = async (userID) => {
         participants: userID
     })
         .populate('participants', 'fullname avatar role')
+        .populate('lastMessage.senderID', 'fullname avatar role expoPushToken')
         .sort({ updatedAt: -1 })
         .lean();
 };
@@ -92,5 +119,7 @@ module.exports = {
     saveMessage,
     getConversationList,
     getMessageHistory,
-    markAsRead
+    markAsRead,
+    getBroadcastConversations,
+    createBroadcastConversation
 };

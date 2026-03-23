@@ -1,5 +1,5 @@
 const express = require("express");
-const { userRegisterController, verifyEmailController, loginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController } = require("../controller/user.controller");
+const { userRegisterController, verifyEmailController, loginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController, getUserProfileController, getReferralHistoryController } = require("../controller/user.controller");
 const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController, getLawyersController } = require("../controller/lawyer.controller");
 const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
@@ -43,8 +43,16 @@ const {
     startChatController,
     getConversationsController,
     getMessagesController,
-    sendMessageController
+    sendMessageController,
+    createBroadcastController,
+    getBroadcastsController
 } = require("../controller/chat.controller");
+const {
+    getFormTypesController,
+    legalAiChatController,
+    downloadLegalFormController,
+    getAiHistoryController
+} = require("../controller/legalAiChat.controller");
 
 const router = express.Router();
 
@@ -79,6 +87,8 @@ router.post("/booking/create", verifyAccessToken, createBookingController);
 router.get("/booking/list", verifyAccessToken, getUserBookingsController);
 router.get("/booking/detail/:bookingId", verifyAccessToken, getBookingDetailController);
 router.put("/profile", verifyAccessToken, updateUserProfileController);
+router.get("/profile", verifyAccessToken, getUserProfileController);
+router.get("/referrals", verifyAccessToken, getReferralHistoryController);
 router.post("/change-password", verifyAccessToken, changePasswordController);
 router.post("/forgot-password/check-email", authLimiter, checkAccountExistsController);
 router.post("/forgot-password/verify-otp", verifyForgotPasswordOTPController);
@@ -137,5 +147,13 @@ router.post("/chat/start", verifyAccessToken, startChatController);
 router.get("/chat/conversations", verifyAccessToken, getConversationsController);
 router.get("/chat/history/:conversationID", verifyAccessToken, getMessagesController);
 router.post("/chat/send", verifyAccessToken, sendMessageController);
+router.post("/chat/broadcast", verifyAccessToken, createBroadcastController);
+router.get("/chat/broadcasts", verifyAccessToken, getBroadcastsController);
+
+// Legal AI Chat - Form Generation routes
+router.get("/legal/ai-chat/form-types", getFormTypesController);
+router.post("/legal/ai-chat", legalAiChatController);
+router.post("/legal/ai-chat/download", downloadLegalFormController);
+router.get("/legal/ai-chat/history", verifyAccessToken, getAiHistoryController);
 
 module.exports = router;

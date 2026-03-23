@@ -65,7 +65,7 @@ const lawyerRegister = async (userData) => {
   if (lawyerProfile) {
     // Cập nhật profile cũ
     lawyerProfile.lawyerId = lawyerId;
-    lawyerProfile.specialty = specialty;
+    lawyerProfile.specialty = Array.isArray(specialty) ? specialty : [specialty];
     lawyerProfile.firmName = firmName;
     lawyerProfile.lawyerCardImage = lawyerCardImage;
     lawyerProfile.avatar = avatar;
@@ -77,7 +77,7 @@ const lawyerRegister = async (userData) => {
     await lawyerModel.create({
       userID: user._id,
       lawyerId,
-      specialty,
+      specialty: Array.isArray(specialty) ? specialty : [specialty],
       firmName,
       lawyerCardImage,
       avatar,
@@ -228,7 +228,9 @@ const updateLawyerProfile = async (userId, lawyerId, updateData) => {
   // 2. Cập nhật bảng Lawyer
   const lawyerUpdate = {};
   if (avatar) lawyerUpdate.avatar = avatar;
-  if (specialty) lawyerUpdate.specialty = specialty;
+  if (specialty) {
+    lawyerUpdate.specialty = Array.isArray(specialty) ? specialty : [specialty];
+  }
   if (firmName) lawyerUpdate.firmName = firmName;
   if (bankInfo) lawyerUpdate.bankInfo = bankInfo;
   if (Object.keys(lawyerUpdate).length > 0) {

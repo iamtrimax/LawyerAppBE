@@ -14,7 +14,7 @@ const lawyerSchema = new mongoose.Schema({
     unique: true,
   },
   specialty: {
-    type: String,
+    type: [String],
     required: true,
   },
   firmName: {
