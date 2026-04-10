@@ -68,7 +68,7 @@ const initSocket = (server) => {
             const { callerId, answer } = data;
             const callerSocketId = userSockets.get(callerId);
             if (callerSocketId) {
-                io.to(callerSocketId).emit("call-accepted", { answer });
+                io.to(callerSocketId).emit("call-accepted", { answer, fromSocketId: socket.id });
             }
         });
 
