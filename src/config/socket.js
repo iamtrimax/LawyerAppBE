@@ -104,18 +104,49 @@ const initSocket = (server) => {
         // Gửi ứng viên ICE (WebRTC)
         socket.on("ice-candidate", (data) => {
             const { targetId, candidate } = data;
-            const targetSocketId = userSockets.get(targetId);
+            
+            // Tìm socket ID: Nếu targetId là User ID thì lấy từ map, 
+            // nếu không tìm thấy thì xem như targetId chính là Socket ID
+            const targetSocketId = userSockets.get(targetId) || targetId;
+            
             if (targetSocketId) {
+                console.log(`Routing ICE candidate to: ${targetSocketId}`);
                 io.to(targetSocketId).emit("ice-candidate", { candidate });
             }
         });
 
         // Kết thúc cuộc gọi
-        socket.on("hang-up", (data) => {
+        socket.on("hang-up", async (data) => {
             const { targetId } = data;
-            const targetSocketId = userSockets.get(targetId);
+            const targetSocketId = userSockets.get(targetId) || targetId;
+            
+            // 1. Gửi qua Socket nếu đối phương đang online
             if (targetSocketId) {
                 io.to(targetSocketId).emit("hang-up");
+            }
+
+            // 2. Dự phòng: Gửi Push Notification "ngắt máy" để máy người nghe dừng reo (nếu họ đang offline/background)
+            try {
+                // Nếu targetId là Socket ID, chúng ta cần tìm lại User ID để lấy token
+                let receiverUserId = targetId;
+                for (let [uid, sid] of userSockets.entries()) {
+                    if (sid === targetId) {
+                        receiverUserId = uid;
+                        break;
+                    }
+                }
+
+                const receiver = await User.findById(receiverUserId);
+                if (receiver && receiver.expoPushToken) {
+                    await sendPushNotification(
+                        receiver.expoPushToken,
+                        "Cuộc gọi đã kết thúc",
+                        "Người gọi đã gác máy",
+                        { action: "hang-up" }
+                    );
+                }
+            } catch (error) {
+                console.error("Lỗi khi gửi push notification hang-up:", error);
             }
         });
 
