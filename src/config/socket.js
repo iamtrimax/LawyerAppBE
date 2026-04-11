@@ -6,6 +6,7 @@ const { sendPushNotification } = require("../services/notification.services");
 
 let io;
 const userSockets = new Map(); // Link userId -> socket.id
+const pendingOffersByReceiver = new Map(); // Lưu trữ offer cho người dùng offline/background
 
 const initSocket = (server) => {
     io = new Server(server, {
@@ -22,6 +23,15 @@ const initSocket = (server) => {
         socket.on("register", (userId) => {
             userSockets.set(userId, socket.id);
             console.log(`User ${userId} registered with socket ${socket.id}`);
+
+            // Kiểm tra xem có cuộc gọi nào đang chờ người dùng này không (Đồng bộ sau khi mở App)
+            const pendingCall = pendingOffersByReceiver.get(userId);
+            if (pendingCall) {
+                console.log(`Syncing pending call to re-activated user: ${userId}`);
+                socket.emit("incoming-call", pendingCall);
+                // Ghi chú: Không xóa ngay, để máy người dùng có thời gian xử lý. 
+                // Xóa khi có accept/reject/hangup.
+            }
         });
 
         // Cập nhật Expo Push Token cho User
@@ -50,21 +60,30 @@ const initSocket = (server) => {
             const { callerId, callerName, receiverId, type, offer } = data;
             const receiverSocketId = userSockets.get(receiverId);
 
-            // LUÔN LUÔN gửi Push Notification để đảm bảo người dùng nhận được trên Lock Screen
+            // 1. Lưu Offer vào bộ nhớ tạm để đồng bộ sau (Tránh gửi gói tin quá lớn qua Push)
+            pendingOffersByReceiver.set(receiverId, {
+                callerId,
+                callerName,
+                callerSocketId: socket.id,
+                type,
+                offer
+            });
+
+            // 2. Gửi Push Notification SIÊU NHẸ (Không kèm offer) để đảm bảo Android/iOS không chặn
             try {
                 const receiver = await User.findById(receiverId);
                 if (receiver && receiver.expoPushToken) {
-                    console.log("Sending push notification to:", receiverId);
+                    console.log("Sending lightweight push notification to:", receiverId);
                     await sendPushNotification(
                         receiver.expoPushToken,
                         "Cuộc gọi đến",
                         `${callerName} đang gọi cho bạn...`,
-                        { 
-                            callerId, 
-                            callerName, 
-                            type, 
-                            offer, // Cực kỳ quan trọng để bên nhận có thể accept
-                            action: "incoming-call" 
+                        {
+                            callerId,
+                            callerName,
+                            type,
+                            // CHÚ Ý: Không gửi offer ở đây để tối ưu dung lượng tin nhắn Push
+                            action: "incoming-call"
                         }
                     );
                 }
@@ -72,11 +91,12 @@ const initSocket = (server) => {
                 console.error("Lỗi khi gửi push notification cho cuộc gọi:", error);
             }
 
+            // 3. Nếu online, gửi thêm sự kiện qua socket (Có kèm offer)
             if (receiverSocketId) {
-                // Nếu online, gửi thêm sự kiện incoming-call qua socket để xử lý nhanh
                 io.to(receiverSocketId).emit("incoming-call", {
                     callerId,
                     callerName,
+                    callerSocketId: socket.id,
                     type,
                     offer
                 });
@@ -87,6 +107,15 @@ const initSocket = (server) => {
         socket.on("accept-call", (data) => {
             const { callerId, answer } = data;
             const callerSocketId = userSockets.get(callerId);
+
+            // Tìm UserId của người chấp nhận để dọn dẹp hàng chờ
+            for (let [uid, sid] of userSockets.entries()) {
+                if (sid === socket.id) {
+                    pendingOffersByReceiver.delete(uid);
+                    break;
+                }
+            }
+
             if (callerSocketId) {
                 io.to(callerSocketId).emit("call-accepted", { answer, fromSocketId: socket.id });
             }
@@ -96,6 +125,15 @@ const initSocket = (server) => {
         socket.on("reject-call", (data) => {
             const { callerId } = data;
             const callerSocketId = userSockets.get(callerId);
+
+            // Dọn dẹp hàng chờ
+            for (let [uid, sid] of userSockets.entries()) {
+                if (sid === socket.id) {
+                    pendingOffersByReceiver.delete(uid);
+                    break;
+                }
+            }
+
             if (callerSocketId) {
                 io.to(callerSocketId).emit("call-rejected");
             }
@@ -104,13 +142,12 @@ const initSocket = (server) => {
         // Gửi ứng viên ICE (WebRTC)
         socket.on("ice-candidate", (data) => {
             const { targetId, candidate } = data;
-            
+
             // Tìm socket ID: Nếu targetId là User ID thì lấy từ map, 
             // nếu không tìm thấy thì xem như targetId chính là Socket ID
             const targetSocketId = userSockets.get(targetId) || targetId;
-            
+
             if (targetSocketId) {
-                console.log(`Routing ICE candidate to: ${targetSocketId}`);
                 io.to(targetSocketId).emit("ice-candidate", { candidate });
             }
         });
@@ -119,13 +156,16 @@ const initSocket = (server) => {
         socket.on("hang-up", async (data) => {
             const { targetId } = data;
             const targetSocketId = userSockets.get(targetId) || targetId;
-            
-            // 1. Gửi qua Socket nếu đối phương đang online
+
+            // 1. Dọn dẹp hàng chờ
+            pendingOffersByReceiver.delete(targetId);
+
+            // 2. Gửi qua Socket nếu đối phương đang online
             if (targetSocketId) {
                 io.to(targetSocketId).emit("hang-up");
             }
 
-            // 2. Dự phòng: Gửi Push Notification "ngắt máy" để máy người nghe dừng reo (nếu họ đang offline/background)
+            // 3. Dự phòng: Gửi Push Notification "ngắt máy" để máy người nghe dừng reo (nếu họ đang offline/background)
             try {
                 // Nếu targetId là Socket ID, chúng ta cần tìm lại User ID để lấy token
                 let receiverUserId = targetId;
