@@ -24,6 +24,19 @@ const initSocket = (server) => {
             console.log(`User ${userId} registered with socket ${socket.id}`);
         });
 
+        // Cập nhật Expo Push Token cho User
+        socket.on("update-push-token", async (data) => {
+            const { userId, pushToken } = data;
+            try {
+                if (userId && pushToken) {
+                    await User.findByIdAndUpdate(userId, { expoPushToken: pushToken });
+                    console.log(`Push token updated for user ${userId}`);
+                }
+            } catch (error) {
+                console.error("Error updating push token:", error);
+            }
+        });
+
         // Join room hội thoại hoặc room cá nhân
         socket.on("join", (roomId) => {
             socket.join(roomId);
@@ -37,29 +50,36 @@ const initSocket = (server) => {
             const { callerId, callerName, receiverId, type, offer } = data;
             const receiverSocketId = userSockets.get(receiverId);
 
+            // LUÔN LUÔN gửi Push Notification để đảm bảo người dùng nhận được trên Lock Screen
+            try {
+                const receiver = await User.findById(receiverId);
+                if (receiver && receiver.expoPushToken) {
+                    console.log("Sending push notification to:", receiverId);
+                    await sendPushNotification(
+                        receiver.expoPushToken,
+                        "Cuộc gọi đến",
+                        `${callerName} đang gọi cho bạn...`,
+                        { 
+                            callerId, 
+                            callerName, 
+                            type, 
+                            offer, // Cực kỳ quan trọng để bên nhận có thể accept
+                            action: "incoming-call" 
+                        }
+                    );
+                }
+            } catch (error) {
+                console.error("Lỗi khi gửi push notification cho cuộc gọi:", error);
+            }
+
             if (receiverSocketId) {
-                // Nếu online, gửi sự kiện incoming-call qua socket
+                // Nếu online, gửi thêm sự kiện incoming-call qua socket để xử lý nhanh
                 io.to(receiverSocketId).emit("incoming-call", {
                     callerId,
                     callerName,
                     type,
                     offer
                 });
-            } else {
-                // Nếu offline, gửi Push Notification qua Expo
-                try {
-                    const receiver = await User.findById(receiverId);
-                    if (receiver && receiver.expoPushToken) {
-                        await sendPushNotification(
-                            receiver.expoPushToken,
-                            "Cuộc gọi đến",
-                            `${callerName} đang gọi cho bạn...`,
-                            { callerId, callerName, type, action: "incoming-call" }
-                        );
-                    }
-                } catch (error) {
-                    console.error("Lỗi khi gửi push notification cho cuộc gọi:", error);
-                }
             }
         });
 

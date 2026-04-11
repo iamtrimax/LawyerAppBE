@@ -22,6 +22,9 @@ const sendPushNotification = async (pushToken, title, body, data = {}) => {
         title: title,
         body: body,
         data: data,
+        // QUAN TRỌNG: Thêm dòng này để hiển thị nút Chấp nhận/Từ chối ở Client
+        categoryIdentifier: "incoming-call", 
+        priority: "high",
     }];
 
     let chunks = expo.chunkPushNotifications(messages);
@@ -33,6 +36,7 @@ const sendPushNotification = async (pushToken, title, body, data = {}) => {
         }
     }
 };
+
 
 /**
  * Gửi thông báo kép (Email + Push)
