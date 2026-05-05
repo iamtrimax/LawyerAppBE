@@ -9,6 +9,15 @@ require('dotenv').config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// Danh sách model hỗ trợ Google Search Grounding
+const AVAILABLE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro", 
+    "gemini-2.0-flash",
+    "gemini-flash-latest",
+    "gemini-pro-latest"
+];
+
 /**
  * Danh sách mẫu đơn phổ biến
  */
@@ -26,19 +35,9 @@ const COMMON_FORM_TYPES = [
 ];
 
 /**
- * Kết hợp Web Search (Grounding): Sử dụng Google Search để tìm kiếm mẫu đơn mới nhất trên mạng
+ * Kết hợp Web Search (Grounding) + Multi-Key + Multi-Model Fallback
  */
 const generateFormContent = async (userPrompt, userID = null) => {
-    // Sử dụng model gemini-1.5-flash hỗ trợ grounding
-    const model = genAI.getGenerativeModel({ 
-        model: 'gemini-2.5-flash',
-        tools: [
-            {
-                googleSearch: {},
-            },
-        ],
-    });
-
     const systemPrompt = `
 Bạn là chuyên gia pháp lý Việt Nam. Người dùng yêu cầu tạo một mẫu đơn / tài liệu pháp luật.
 NHIỆM VỤ QUAN TRỌNG: 
@@ -81,10 +80,70 @@ ${userPrompt}
 
 CHỈ trả về JSON thuần túy:`;
 
-    const result = await model.generateContent(systemPrompt);
-    const responseText = result.response.text().trim();
+    // MULTI-KEY & MULTI-MODEL FALLBACK
+    const API_KEYS = process.env.GEMINI_API_KEY.split(',').map(k => k.trim());
+    let responseText = "";
+    let keyIndex = 0;
+    let modelIndex = 0;
+    let retryCount = 0;
+    const MAX_RETRIES_PER_MODEL = 1;
 
-    // Bỏ code block markdown nếu có
+    while (keyIndex < API_KEYS.length && !responseText) {
+        const currentKey = API_KEYS[keyIndex];
+        const genAIInstance = new GoogleGenerativeAI(currentKey);
+        modelIndex = 0;
+
+        while (modelIndex < AVAILABLE_MODELS.length) {
+            const currentModelName = AVAILABLE_MODELS[modelIndex];
+            const model = genAIInstance.getGenerativeModel({
+                model: currentModelName,
+                tools: [{ googleSearch: {} }]
+            });
+
+            try {
+                console.log(`📝 PencilLaw AI: Key ${keyIndex + 1}/${API_KEYS.length} - Model ${currentModelName}`);
+                const result = await model.generateContent(systemPrompt);
+                const response = await result.response;
+                responseText = response.text().trim();
+                if (responseText) break;
+            } catch (err) {
+                const errorMessage = err.message || "";
+                const isQuotaError = errorMessage.includes('429') ||
+                                     errorMessage.includes('Quota exceeded') ||
+                                     errorMessage.includes('rate limit');
+                const isRetryableError = errorMessage.includes('503') ||
+                                         errorMessage.includes('high demand');
+
+                if (isQuotaError) {
+                    console.warn(`⚠️ PencilLaw AI: Key ${keyIndex + 1} - Model ${currentModelName} hết quota, chuyển model...`);
+                    modelIndex++;
+                    continue;
+                }
+
+                if (isRetryableError && retryCount < MAX_RETRIES_PER_MODEL) {
+                    retryCount++;
+                    console.warn(`🔄 PencilLaw AI: Model ${currentModelName} lỗi tạm thời, thử lại...`);
+                    await new Promise(r => setTimeout(r, 1000));
+                    continue;
+                }
+
+                console.error(`❌ PencilLaw AI: Model ${currentModelName} lỗi: ${errorMessage}`);
+                modelIndex++;
+                retryCount = 0;
+            }
+        }
+
+        if (!responseText) {
+            keyIndex++;
+            console.warn(`🔑 PencilLaw AI: Chuyển sang API Key ${keyIndex + 1}...`);
+        }
+    }
+
+    if (!responseText) {
+        throw new Error('Tất cả API Key và Model đều hết quota. Vui lòng thử lại sau.');
+    }
+
+    // Parse JSON response
     const cleaned = responseText
         .replace(/^```json\s*/i, '')
         .replace(/^```\s*/i, '')

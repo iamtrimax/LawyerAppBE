@@ -2,7 +2,68 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Article = require('../model/article.model');
 const { generateEmbedding } = require('./embedding.service');
 const NodeCache = require('node-cache');
+const axios = require('axios');
+const cheerio = require('cheerio');
 require('dotenv').config();
+
+// Cấu hình axios với timeout
+const axiosInstance = axios.create({
+    timeout: 8000,
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+});
+
+/**
+ * Crawl nội dung chính từ URL, hỗ trợ follow redirect
+ * Trả về { title, content, textContent, finalUrl } hoặc null
+ */
+async function crawlUrl(url) {
+    try {
+        // Follow redirect để lấy URL thực (đặc biệt cho Google grounding redirect)
+        const response = await axiosInstance.get(url, { maxRedirects: 5 });
+        const finalUrl = response.request?.res?.responseUrl || response.config?.url || url;
+        const $ = cheerio.load(response.data);
+        
+        // Loại bỏ các thẻ rác
+        $('script, style, nav, footer, header, ads, .ads, #ads, iframe, noscript, .sidebar, .menu, .breadcrumb, .related-posts').remove();
+        
+        // Trích xuất tiêu đề thực từ trang
+        const pageTitle = $('h1').first().text().trim() 
+            || $('title').text().trim()
+            || $('meta[property="og:title"]').attr('content')
+            || '';
+        
+        // Lấy nội dung (ưu tiên các thẻ bài viết)
+        let content = $('article').html() 
+            || $('.post-content').html() 
+            || $('.entry-content').html()
+            || $('.content-detail').html()
+            || $('.article-content').html()
+            || $('#content').html() 
+            || $('main').html() 
+            || $('body').html();
+        
+        // Làm sạch text
+        if (content) {
+            const $content = cheerio.load(content);
+            $content('script, style, nav, footer, header, ads, iframe').remove();
+            content = $content.html();
+        }
+        
+        const textContent = content ? cheerio.load(content).text().replace(/\s+/g, ' ').trim() : '';
+        
+        return {
+            title: pageTitle,
+            content: content ? content.substring(0, 8000) : '',
+            textContent: textContent.substring(0, 3000),
+            finalUrl: finalUrl
+        };
+    } catch (error) {
+        console.error(`Crawl error for ${url}:`, error.message);
+        return null;
+    }
+}
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const searchCache = new NodeCache({ stdTTL: 3600 }); // Cache for 1 hour
@@ -66,19 +127,20 @@ const cosineSimilarity = (vecA, vecB) => {
 };
 
 /**
- * AI Search Service using RAG + Vector Search + Caching
+ * AI Search Service using RAG + Vector Search + Caching + History Context
  */
-const aiSearch = async (query) => {
+const aiSearch = async (query, history = []) => {
     try {
         const startTime = Date.now();
 
-        // 0. CHECK CACHE
+        // 0. CHECK CACHE (Chỉ cache cho query đơn lẻ, có history thì bỏ qua cache để đảm bảo tính động)
         const cacheKey = `search_${query.toLowerCase().trim()}`;
-        const cachedResult = searchCache.get(cacheKey);
-        if (cachedResult) {
-            console.log("🚀 Serving from Cache");
-            console.log(`TotalSearchTime: ${Date.now() - startTime}ms`);
-            return cachedResult;
+        if (history.length === 0) {
+            const cachedResult = searchCache.get(cacheKey);
+            if (cachedResult) {
+                console.log("🚀 Serving from Cache");
+                return cachedResult;
+            }
         }
 
         // 1. Generate Embedding for the query
@@ -93,141 +155,231 @@ const aiSearch = async (query) => {
 
         if (queryEmbedding) {
             const vectorStartTime = Date.now();
-            console.log("Using Vector Search (In-Memory)...");
-
-            // LAZY INITIALIZATION: If cache is empty, try to initialize it
-            if (vectorCache.length === 0) {
-                await initializeVectorCache();
-            }
+            if (vectorCache.length === 0) await initializeVectorCache();
 
             if (vectorCache.length > 0) {
-                // Calculate similarity in memory using the cache
-                const ranked = vectorCache.map(doc => {
-                    return {
-                        _id: doc._id,
-                        similarity: cosineSimilarity(queryEmbedding, doc.embedding)
-                    };
-                })
-                    .sort((a, b) => b.similarity - a.similarity)
-                    .slice(0, 2); // OPTIMIZATION: Reduce from 3 to 2
+                const SIMILARITY_THRESHOLD = 0.9; // Ngưỡng tối thiểu để coi là liên quan (Yêu cầu chính xác cao)
+                const ranked = vectorCache.map(doc => ({
+                    _id: doc._id,
+                    similarity: cosineSimilarity(queryEmbedding, doc.embedding)
+                }))
+                .filter(r => r.similarity >= SIMILARITY_THRESHOLD) // Loại bỏ các kết quả độ tương đồng thấp
+                .sort((a, b) => b.similarity - a.similarity)
+                .slice(0, 2);
 
-                // Fetch full details only for the winners
-                const topIds = ranked.map(r => r._id);
-                const topArticles = await Article.find({ _id: { $in: topIds } })
-                    .select('title content category sourceUrl');
+                if (ranked.length > 0) {
+                    const topIds = ranked.map(r => r._id);
+                    const topArticles = await Article.find({ _id: { $in: topIds } })
+                        .select('title content category sourceUrl');
 
-                // Merge similarity scores back
-                articles = topArticles.map(art => {
-                    const rank = ranked.find(r => r._id.equals(art._id));
-                    return { ...art._doc, similarity: rank ? rank.similarity : 0 };
-                }).sort((a, b) => b.similarity - a.similarity);
+                    articles = topArticles.map(art => {
+                        const plainArt = art.toObject();
+                        const rank = ranked.find(r => r._id.toString() === art._id.toString());
+                        return { ...plainArt, similarity: rank ? rank.similarity : 0 };
+                    }).sort((a, b) => b.similarity - a.similarity);
+                }
             }
-            console.log(`VectorRanking: ${Date.now() - vectorStartTime}ms`);
         }
 
-        // FALLBACK: If vector search yields no results, use Text Search
-        if (articles.length === 0) {
-            console.log("Falling back to Text Search...");
-            articles = await Article.find(
-                { $text: { $search: query } },
-                { score: { $meta: 'textScore' } }
-            )
-                .sort({ score: { $meta: 'textScore' } })
-                .limit(2) // OPTIMIZATION: Reduce from 3 to 2
-                .select('title content category sourceUrl');
-        }
+        // Text search fallback đã bị loại bỏ vì trả về nguồn không liên quan.
+        // Nếu vector search không tìm thấy (ngưỡng 90%), Google Search sẽ bổ sung.
 
-        // FALLBACK: If articles.length === 0, we continue to Gemini but inform it to use general knowledge/search
         const hasLocalContext = articles.length > 0;
 
-        // 3. CONSTRUCT CONTEXT
+        // 3. CONSTRUCT CONTEXT & HISTORY
         let context = "Dưới đây là một số thông tin từ các văn bản pháp luật tìm thấy:\n\n";
         articles.forEach((art, index) => {
-            const similarityLabel = art.similarity ? ` (Độ tương đương: ${(art.similarity * 100).toFixed(1)}%)` : '';
-            // OPTIMIZATION: Reduce content length from 2000 to 1500
-            context += `[Tài liệu ${index + 1}]${similarityLabel}:\nTiêu đề: ${art.title}\nLoại: ${art.category}\nNội dung: ${art.content.replace(/<[^>]*>?/gm, '').substring(0, 1500)}...\n\n`;
+            context += `[Tài liệu ${index + 1}]:\nTiêu đề: ${art.title}\nNội dung: ${art.content.replace(/<[^>]*>?/gm, '').substring(0, 1500)}...\n\n`;
         });
 
-        // 4. GENERATE ANSWER WITH GEMINI
-        // Using gemini-1.5-flash for reliability.
-        // Google Search is implicitly available in modern Gemini models.
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.5-flash"
-        });
+        // Định dạng lịch sử hội thoại
+        let historyContext = "";
+        if (history && history.length > 0) {
+            historyContext = "LỊCH SỬ HỘI THOẠI TRƯỚC ĐÓ:\n";
+            history.slice(-5).forEach(msg => { // Lấy 5 tin nhắn gần nhất
+                const role = (msg.senderID === 'AI_ASSISTANT' || msg.isAiResponse) ? "AI" : "Người dùng";
+                historyContext += `${role}: ${msg.text}\n`;
+            });
+            historyContext += "\n--- END HISTORY ---\n\n";
+        }
 
-        const prompt = hasLocalContext ? `
-Bạn là một trợ lý AI chuyên gia về pháp luật Việt Nam. 
-Dựa vào ngữ cảnh (CONTEXT) được cung cấp dưới đây, hãy trả lời câu hỏi của người dùng một cách chính xác, chuyên sâu và khách quan.
+        // 4. CONSTRUCT PROMPT
+        const systemPrompt = hasLocalContext ? `
+Bạn là một trợ lý AI pháp luật thân thiện. 
+NHIỆM VỤ: Trả lời câu hỏi dựa trên CONTEXT và HISTORY.
 
-LƯU Ý QUAN TRỌNG:
-1. Trích dẫn chính xác các điều khoản nếu có trong CONTEXT.
-2. Nếu CONTEXT có thông tin nhưng chưa đầy đủ, bạn có thể bổ sung kiến thức từ Google Search để câu trả lời thêm hoàn thiện, nhưng phải ưu tiên nguồn từ CONTEXT.
-3. Luôn ghi rõ nguồn trích dẫn từ CONTEXT (Tên tài liệu, tiêu đề) ở cuối câu trả lời.
-4. Nếu bạn sử dụng thông tin từ Google Search, hãy chú thích rõ là "Thông tin bổ sung từ tìm kiếm Google".
+PHONG CÁCH TRẢ LỜI:
+1. NGẮN GỌN & ĐÚNG TRỌNG TÂM: Không giải thích dài dòng, không lặp lại toàn bộ dữ liệu. Trả lời thẳng vào vấn đề.
+2. TỰ NHIÊN: Trò chuyện như hai người bình thường. Tránh dùng các cụm từ máy móc như "Dựa trên ngữ cảnh được cung cấp...".
+3. TRỰC TIẾP: Nếu CONTEXT có câu trả lời, hãy nói ngay kết quả.
+4. TRA CỨU: Bạn có quyền sử dụng Google Search để cập nhật thông tin mới nhất. Chỉ sử dụng CONTEXT nếu nó thực sự chứa thông tin về câu hỏi.
+5. CHÍNH XÁC: Tuyệt đối không dẫn lời hoặc sử dụng tài liệu trong CONTEXT nếu nội dung không khớp với chủ đề người dùng đang hỏi.
+6. NẾU CÓ TIẾP NỐI: Bám sát mạch hội thoại trong HISTORY.
 
 ---
+${historyContext}
 CONTEXT:
 ${context}
 ---
-
-CÂU HỎI CỦA NGƯỜI DÙNG:
-${query}
-
-TRẢ LỜI:
 ` : `
-Bạn là một trợ lý AI chuyên gia về pháp luật Việt Nam. 
-Hiện tại kho dữ liệu nội bộ của chúng tôi không có văn bản cụ thể nào khớp hoàn toàn với câu hỏi của bạn.
+Bạn là một trợ lý AI pháp luật thân thiện. 
+Hãy sử dụng kiến thức của bạn kết hợp với Google Search để trả lời NGẮN GỌN, TỰ NHIÊN như đang chat bình thường.
+Bám sát HISTORY nếu người dùng đang hỏi tiếp các ý trước.
 
-NHIỆM VỤ:
-1. Hãy sử dụng khả năng tìm kiếm Google (Google Search) và kiến thức nội tại của bạn để trả lời câu hỏi của người dùng một cách chuyên nghiệp nhất.
-2. Nêu rõ ngay đầu câu trả lời: "Tôi không tìm thấy văn bản pháp luật cụ thể trong kho dữ liệu nội bộ, dưới đây là thông tin tôi tìm kiếm được từ Google để hỗ trợ bạn:"
-3. Trình bày rõ ràng, dễ hiểu và tư vấn đúng trọng tâm vấn đề pháp lý.
-
-CÂU HỎI CỦA NGƯỜI DÙNG:
-${query}
-
-TRẢ LỜI:
+---
+${historyContext}
+---
 `;
 
+        const finalPrompt = `${systemPrompt}\nCÂU HỎI HIỆN TẠI: ${query}\nTRẢ LỜI:`;
+
+        // 5. GENERATE ANSWER WITH MULTI-KEY & MULTI-MODEL FALLBACK
+        const API_KEYS = process.env.GEMINI_API_KEY.split(',').map(k => k.trim());
+        const AVAILABLE_MODELS = [
+            "gemini-2.5-flash", 
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-flash-latest",
+            "gemini-pro-latest"
+        ];
+
         let answer = "";
+        let keyIndex = 0;
+        let modelIndex = 0;
         let retryCount = 0;
-        const MAX_RETRIES = 3;
+        const MAX_RETRIES_PER_MODEL = 1;
 
-        while (retryCount <= MAX_RETRIES) {
-            try {
-                const result = await model.generateContent(prompt);
-                const response = await result.response;
-                answer = response.text();
-                break;
-            } catch (err) {
-                if ((err.message.includes('429') || err.message.includes('Quota exceeded')) && retryCount < MAX_RETRIES) {
-                    retryCount++;
-                    // Faster backoff: 1s, 2s, 4s
-                    const delay = Math.pow(2, retryCount) * 1000;
-                    await new Promise(r => setTimeout(r, delay));
-                    continue;
-                }
+        // Vòng lặp thử từng Key
+        while (keyIndex < API_KEYS.length && !answer) {
+            const currentKey = API_KEYS[keyIndex];
+            const genAIInstance = new GoogleGenerativeAI(currentKey);
+            modelIndex = 0; // Reset model cho key mới
 
-                // If we failed after all retries because of Quota or other error, 
-                // DO NOT THROW. Return sources so user can investigate themselves.
-                if (retryCount === MAX_RETRIES) {
-                    console.error("AI Generation failed after max retries:", err.message);
-                    answer = "Hiện tại hệ thống AI đang quá tải (hết lượt miễn phí). Tuy nhiên, tôi đã tìm thấy các văn bản gốc liên quan dưới đây. Bạn vui lòng tham khảo trực tiếp nhé!";
-                    break;
+            // Vòng lặp thử từng Model của Key đó
+            while (modelIndex < AVAILABLE_MODELS.length) {
+                const currentModelName = AVAILABLE_MODELS[modelIndex];
+                const model = genAIInstance.getGenerativeModel({ 
+                    model: currentModelName,
+                    tools: [{ googleSearch: {} }] 
+                });
+
+                try {
+                    const result = await model.generateContent(finalPrompt);
+                    const response = await result.response;
+                    answer = response.text();
+                    
+                    // 6. TRÍCH XUẤT GROUNDING METADATA (GOOGLE SEARCH SOURCES)
+                    if (response.candidates?.[0]?.groundingMetadata) {
+                        const metadata = response.candidates[0].groundingMetadata;
+                        const searchSources = [];
+                        
+                        if (metadata.groundingChunks) {
+                            // Lấy danh sách URL từ Google Grounding
+                            const rawChunks = metadata.groundingChunks
+                                .filter(chunk => chunk.web)
+                                .slice(0, 3); // Giới hạn 3 nguồn để tối ưu tốc độ
+
+                            // Luôn crawl Google sources để lấy title + content thật
+                            console.log(`🕸️ Đang crawl ${rawChunks.length} nguồn từ Google...`);
+                            const crawlPromises = rawChunks.map(async (chunk, index) => {
+                                const crawled = await crawlUrl(chunk.web.uri);
+                                if (crawled) {
+                                    return {
+                                        _id: `google-source-${index}-${Date.now()}`,
+                                        title: crawled.title || chunk.web.title || "Nguồn từ Google",
+                                        sourceUrl: crawled.finalUrl || chunk.web.uri,
+                                        category: "Tham khảo Google",
+                                        content: crawled.content || ""
+                                    };
+                                }
+                                return null;
+                            });
+                            const crawledSources = (await Promise.all(crawlPromises)).filter(Boolean);
+
+                            if (articles.length === 0) {
+                                // Không có bài viết nội bộ -> dùng Google sources
+                                articles = crawledSources;
+                            } else {
+                                // Có bài viết nội bộ -> bổ sung Google sources
+                                const existingUrls = articles.map(a => a.sourceUrl);
+                                crawledSources.forEach(s => {
+                                    if (!existingUrls.includes(s.sourceUrl)) {
+                                        articles.push(s);
+                                    }
+                                });
+                            }
+                        }
+                    }
+
+                    if (answer) break; 
+                } catch (err) {
+                    const errorMessage = err.message || "";
+                    const isQuotaError = errorMessage.includes('429') || 
+                                       errorMessage.includes('Quota exceeded') || 
+                                       errorMessage.includes('rate limit');
+                    const isRetryableError = errorMessage.includes('503') || 
+                                           errorMessage.includes('high demand');
+
+                    if (isQuotaError) {
+                        console.warn(`⚠️ Key ${keyIndex + 1} - Model ${currentModelName} hết quota.`);
+                        modelIndex++;
+                        continue;
+                    }
+
+                    if (isRetryableError && retryCount < MAX_RETRIES_PER_MODEL) {
+                        retryCount++;
+                        await new Promise(r => setTimeout(r, 1000));
+                        continue;
+                    }
+
+                    modelIndex++;
+                    retryCount = 0;
                 }
-                throw err;
             }
+
+            if (!answer) {
+                console.warn(`❌ Toàn bộ model của Key ${keyIndex + 1} đều không khả dụng. Chuyển sang Key tiếp theo...`);
+                keyIndex++;
+            }
+        }
+
+        if (!answer) {
+            answer = "Hiện tại tất cả các khóa API và mô hình AI đều đã hết lượt dùng miễn phí (Quota exceeded). Vui lòng thử lại sau vài phút hoặc bổ sung API Key mới.";
         }
 
         console.log(`TotalSearchTime: ${Date.now() - startTime}ms`);
 
+        // 7. LỌC NGUỒN THAM KHẢO CHÍNH XÁC (RELEVANCE FILTERING)
+        const stopWords = ['trong', 'của', 'theo', 'được', 'những', 'các', 'một', 'cho', 'này', 'với', 'đến', 'từ', 'là', 'và', 'hoặc', 'không', 'có', 'tại', 'về', 'phần', 'điều', 'khoản', 'quy', 'định', 'hướng', 'dẫn', 'thi', 'hành'];
+        
+        const filterRelevantSources = (sources, query, answer) => {
+            // Trích xuất từ khóa chủ đề (loại bỏ stop words tiếng Việt)
+            const queryKeywords = query.toLowerCase().split(/\s+/)
+                .filter(w => w.length > 2 && !stopWords.includes(w));
+            
+            return sources.filter(source => {
+                const titleLower = (source.title || "").toLowerCase();
+                const id = source._id?.toString() || '';
+                
+                // Nguồn Google đã crawl thành công (có title thực) -> giữ lại
+                if (id.startsWith('google-source-') && titleLower.length > 5) return true;
+                
+                // Với nguồn nội bộ: yêu cầu ÍT NHẤT 2 từ khóa chủ đề trùng khớp
+                const matchCount = queryKeywords.filter(kw => titleLower.includes(kw)).length;
+                return matchCount >= 2;
+            });
+        };
+
+        const relevantArticles = filterRelevantSources(articles, query, answer);
+
         const finalResult = {
             answer: answer.trim(),
-            sources: articles.map(a => ({
+            sources: relevantArticles.filter(a => a && a._id).map(a => ({
                 _id: a._id,
                 title: a.title,
                 url: a.sourceUrl,
-                category: a.category
+                category: a.category,
+                content: a.content || ""
             }))
         };
 

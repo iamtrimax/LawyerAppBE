@@ -1,3 +1,4 @@
+const { aiSearch } = require("../services/aiSearch.service");
 const { Server } = require("socket.io");
 
 const { saveMessage } = require("../services/chat.services");
@@ -19,18 +20,19 @@ const initSocket = (server) => {
     io.on("connection", (socket) => {
         console.log("A user connected:", socket.id);
 
-        // Đăng ký UserId với SocketId
+        // Đăng ký UserId với SocketId (Hỗ trợ cả Guest ID)
         socket.on("register", (userId) => {
-            userSockets.set(userId, socket.id);
-            console.log(`User ${userId} registered with socket ${socket.id}`);
+            if (!userId) return;
+            userSockets.set(userId.toString(), socket.id);
+            console.log(`User/Guest ${userId} registered with socket ${socket.id}`);
 
-            // Kiểm tra xem có cuộc gọi nào đang chờ người dùng này không (Đồng bộ sau khi mở App)
-            const pendingCall = pendingOffersByReceiver.get(userId);
-            if (pendingCall) {
-                console.log(`Syncing pending call to re-activated user: ${userId}`);
-                socket.emit("incoming-call", pendingCall);
-                // Ghi chú: Không xóa ngay, để máy người dùng có thời gian xử lý. 
-                // Xóa khi có accept/reject/hangup.
+            // Chỉ kiểm tra cuộc gọi cho người dùng thật (không phải Guest)
+            if (!userId.toString().startsWith('guest_')) {
+                const pendingCall = pendingOffersByReceiver.get(userId);
+                if (pendingCall) {
+                    console.log(`Syncing pending call to re-activated user: ${userId}`);
+                    socket.emit("incoming-call", pendingCall);
+                }
             }
         });
 
@@ -190,11 +192,45 @@ const initSocket = (server) => {
             }
         });
 
-        // Logic chat cũ
+        // Logic chat
         socket.on("send_message", async (data) => {
             try {
-                const { conversationID, text, senderID, attachments } = data;
+                const { conversationID, text, senderID, attachments, isAiChat } = data;
 
+                // 1. Nếu là Chat AI
+                if (isAiChat || conversationID === 'AI_CHAT') {
+                    // Gọi AI Search để lấy câu trả lời
+                    try {
+                        const { history } = data; // Nhận history từ frontend
+                        const aiResponse = await aiSearch(text, history);
+                        
+                        const aiMsg = {
+                            _id: `ai-${Date.now()}`,
+                            conversationID: conversationID || 'AI_CHAT',
+                            text: aiResponse.answer,
+                            senderID: 'AI_ASSISTANT',
+                            createdAt: new Date(),
+                            isAiResponse: true,
+                            sources: aiResponse.sources
+                        };
+
+                        // Gửi phản hồi AI cho người dùng
+                        socket.emit("receive_message", aiMsg);
+                    } catch (aiError) {
+                        console.error("AI Search Error in Socket:", aiError);
+                        socket.emit("receive_message", {
+                            _id: `ai-err-${Date.now()}`,
+                            conversationID: conversationID || 'AI_CHAT',
+                            text: "Xin lỗi, hiện tại tôi không thể xử lý câu hỏi này. Vui lòng thử lại sau.",
+                            senderID: 'AI_ASSISTANT',
+                            createdAt: new Date(),
+                            isAiResponse: true
+                        });
+                    }
+                    return;
+                }
+
+                // 2. Chat thông thường (giữa người với người)
                 // Lưu vào database
                 const savedMsg = await saveMessage({ conversationID, senderID, text, attachments });
 
