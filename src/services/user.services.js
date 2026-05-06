@@ -571,6 +571,21 @@ const getUserProfile = async (userId) => {
   if (!user) {
     throw new Error("Người dùng không tồn tại");
   }
+
+  if (user.role === "lawyer") {
+    const lawyerProfile = await lawyerModel.findOne({ userID: user._id });
+    if (lawyerProfile) {
+      const userObj = user.toObject();
+      const profileObj = lawyerProfile.toObject();
+      return {
+        ...userObj,
+        ...profileObj,
+        profileId: profileObj._id,
+        _id: user._id
+      };
+    }
+  }
+
   return user;
 };
 

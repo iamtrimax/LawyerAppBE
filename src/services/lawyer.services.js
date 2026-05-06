@@ -23,8 +23,11 @@ const lawyerRegister = async (userData) => {
   // 1. Kiểm tra User tồn tại hay chưa
   let user = await userModel.findOne({ email });
 
-  const salt = await bcrypt.genSalt(10);
-  const hashedPassword = await bcrypt.hash(password, salt);
+  let hashedPassword = "";
+  if (password) {
+    const salt = await bcrypt.genSalt(10);
+    hashedPassword = await bcrypt.hash(password, salt);
+  }
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
   if (user) {
@@ -40,7 +43,7 @@ const lawyerRegister = async (userData) => {
     } else {
       // Nếu user đã tồn tại nhưng chưa verified, cập nhật lại thông tin
       user.fullname = fullname;
-      user.password = hashedPassword;
+      if (hashedPassword) user.password = hashedPassword;
       user.phone = phone;
       user.otp = otp;
       user.role = "lawyer"; // Đảm bảo role đúng
@@ -48,6 +51,7 @@ const lawyerRegister = async (userData) => {
     }
   } else {
     // Nếu chưa có user, tạo mới User trước
+    if (!password) throw new Error("Mật khẩu là bắt buộc cho tài khoản mới");
     user = await userModel.create({
       fullname,
       email,
