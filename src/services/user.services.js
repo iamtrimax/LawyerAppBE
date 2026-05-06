@@ -138,7 +138,8 @@ const userLogin = async (userData) => {
       role: "lawyer",
       isApproved: lawyerProfile.isApproved,
       profileId: lawyerProfile._id,
-      avatar: lawyerProfile.avatar
+      avatar: lawyerProfile.avatar,
+      lawyerCardImage: lawyerProfile.lawyerCardImage
     };
 
     return { userRes, accessToken, refreshToken };
