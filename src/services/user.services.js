@@ -130,16 +130,19 @@ const userLogin = async (userData) => {
     user.refreshTokens = refreshToken;
     await user.save();
 
-    // PHẲNG HÓA DỮ LIỆU
+    // PHẲNG HÓA DỮ LIỆU: Trả về toàn bộ thông tin user và profile (trừ password, refreshTokens, otp)
+    const userObj = user.toObject();
+    delete userObj.password;
+    delete userObj.refreshTokens;
+    delete userObj.otp;
+
+    const profileObj = lawyerProfile.toObject();
+
     const userRes = {
-      _id: user._id,
-      fullname: user.fullname,
-      email: user.email,
-      role: "lawyer",
-      isApproved: lawyerProfile.isApproved,
-      profileId: lawyerProfile._id,
-      avatar: lawyerProfile.avatar,
-      lawyerCardImage: lawyerProfile.lawyerCardImage
+      ...userObj,
+      ...profileObj,
+      profileId: profileObj._id, // Giữ lại profileId cho tính tương thích
+      _id: user._id // Đảm bảo _id là của User
     };
 
     return { userRes, accessToken, refreshToken };
