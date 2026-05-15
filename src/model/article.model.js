@@ -50,6 +50,8 @@ const articleSchema = new mongoose.Schema({
             'Hiến pháp', 'Bộ luật', 'Luật', 'Pháp lệnh', 'Lệnh',
             'Nghị quyết', 'Nghị quyết liên tịch', 'Nghị định',
             'Quyết định', 'Thông tư', 'Thông tư liên tịch', 'Khác',
+            // Danh mục chung cho bài viết
+            'Dân sự', 'Hình sự', 'Đất đai', 'Hôn nhân', 'Lao động', 'Kinh doanh',
             // Danh mục tùy chỉnh cho văn bản đất đai
             'Chính sách & Quy định chung',
             'Bồi thường & Giải phóng mặt bằng',

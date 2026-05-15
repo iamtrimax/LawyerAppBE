@@ -12,6 +12,11 @@ const approveLawyer = async (lawyerId) => {
   await lawyerProfile.save();
   if (lawyerProfile.userID) {
     await client.del(`lawyer_detail:${lawyerProfile.userID._id}`);
+    // Xóa thêm cache danh sách tìm kiếm để luật sư xuất hiện ngay
+    const keys = await client.keys("lawyers_list:*");
+    if (keys.length > 0) {
+      await Promise.all(keys.map(key => client.del(key)));
+    }
   }
   return lawyerProfile;
 };
