@@ -109,13 +109,10 @@ const deleteResource = async (id) => {
  * Helper: Xóa cache danh sách liên quan
  */
 const invalidateResourceCache = async (language, category) => {
-    // Xóa cache trang 1 cho category cụ thể và 'all'
-    const keys = [
-        `legal_resources:${language}:${category}:1:10`,
-        `legal_resources:${language}:all:1:10`
-    ];
-    for (const key of keys) {
-        await client.del(key);
+    // Xóa tất cả cache liên quan đến danh sách (tất cả các page, search, category)
+    const keys = await client.keys('legal_resources:*');
+    if (keys.length > 0) {
+        await client.del(keys);
     }
 };
 

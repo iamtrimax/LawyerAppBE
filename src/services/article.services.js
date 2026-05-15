@@ -16,7 +16,10 @@ const createArticle = async ({ lawyerId, title, content, category, images, tags,
     });
 
     // Clear list cache
-    await client.del('articles_list_*');
+    const keys = await client.keys('articles_list_*');
+    if (keys.length > 0) {
+        await client.del(keys);
+    }
 
     return newArticle;
 };
@@ -89,7 +92,10 @@ const updateArticle = async (lawyerId, articleId, updateData) => {
     const updatedArticle = await articleModel.findByIdAndUpdate(articleId, updateData, { new: true });
 
     // Clear cache
-    await client.del('articles_list_*');
+    const keys = await client.keys('articles_list_*');
+    if (keys.length > 0) {
+        await client.del(keys);
+    }
 
     return updatedArticle;
 };
@@ -101,7 +107,10 @@ const deleteArticle = async (lawyerId, articleId) => {
     await articleModel.findByIdAndDelete(articleId);
 
     // Clear cache
-    await client.del('articles_list_*');
+    const keys = await client.keys('articles_list_*');
+    if (keys.length > 0) {
+        await client.del(keys);
+    }
 
     return { message: "Xóa bài viết thành công" };
 };

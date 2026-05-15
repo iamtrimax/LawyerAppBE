@@ -135,12 +135,10 @@ const deleteLawyerForm = async (id, lawyerID) => {
  * Helper: Xóa cache danh sách
  */
 const invalidateFormCache = async (category) => {
-    const keys = [
-        `legal_forms:${category}:1:10`,
-        `legal_forms:all:1:10`
-    ];
-    for (const key of keys) {
-        await client.del(key);
+    // Xóa tất cả cache liên quan đến danh sách (tất cả các page, search, category)
+    const keys = await client.keys('legal_forms:*');
+    if (keys.length > 0) {
+        await client.del(keys);
     }
 };
 
