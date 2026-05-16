@@ -22,10 +22,10 @@ async function crawlUrl(url) {
     try {
         const response = await axiosInstance.get(url, { maxRedirects: 5 });
         const finalUrl = response.request?.res?.responseUrl || response.config?.url || url;
-        const $ = cheerio.load(response.data);
+        const parsedUrl = new URL(finalUrl);
+        const domain = parsedUrl.hostname.toLowerCase();
         
-        // 1. Loại bỏ các thành phần rác diện rộng
-        $('script, style, nav, footer, header, ads, .ads, #ads, iframe, noscript, .sidebar, .menu, .breadcrumb, .related-posts, .the-article-share, .the-article-meta, .the-article-toc, .author-item, .article-intro').remove();
+        const $ = cheerio.load(response.data);
         
         // Trích xuất tiêu đề
         const pageTitle = $('h1').first().text().trim() 
@@ -33,65 +33,75 @@ async function crawlUrl(url) {
             || $('meta[property="og:title"]').attr('content')
             || '';
         
-        // 2. Các Selector chuyên biệt cho trang luật Việt Nam
-        const containerSelectors = [
-            '.the-article-body', '.article-content', '.content-detail', 
-            '.post-content', '.entry-content', '#question-body', 
-            '.content_detail', '#content', 'article', 'main', 'body'
-        ];
-
+        // 1. DOMAIN-SPECIFIC SELECTORS (Tìm đúng vùng chứa nội dung của các trang chính thống)
         let $container = null;
-        for (const selector of containerSelectors) {
-            const el = $(selector);
-            if (el.length > 0) {
-                $container = el.first();
-                break;
+        
+        if (domain.includes('luatvietnam.vn')) {
+            $container = $('.the-article-body').first();
+        } else if (domain.includes('thuvienphapluat.vn')) {
+            $container = $('.news-content, .content1, .post-content').first();
+        } else if (domain.includes('luatminhkhue.vn') || domain.includes('luatduonggia.vn')) {
+            $container = $('.post-content, .entry-content').first();
+        } else if (domain.includes('i-law.vn')) {
+            $container = $('#question-body').first();
+        } else {
+            // Fallback cho các trang khác
+            const fallbackSelectors = ['.the-article-body', '.article-content', '.content-detail', '.post-content', '.entry-content', '.news-content', '#content', 'article', 'main'];
+            for (const selector of fallbackSelectors) {
+                const el = $(selector);
+                if (el.length > 0) {
+                    $container = el.first();
+                    break;
+                }
             }
         }
 
         let cleanHtml = '';
         let plainText = '';
 
-        if ($container) {
-            // Xóa rác bên trong container trước khi quét
-            $container.find('script, style, link, meta, xml, object, embed, noscript').remove();
+        if ($container && $container.length > 0) {
+            // 2. LÀM SẠCH RÁC CƠ BẢN VÀ MÃ MS WORD
+            $container.find('script, style, link, meta, xml, object, embed, noscript, iframe, .adv-slot-wrapper, .ad-placeholder, .social-sticky, .the-article-toc').remove();
             
-            // CHỈ TRÍCH XUẤT CÁC THẺ VĂN BẢN (Whitelist Approach)
-            $container.find('p, h1, h2, h3, h4, h5, h6, li, td, th').each((i, el) => {
-                const tagName = el.tagName.toLowerCase();
-                let text = $(el).text().replace(/\s+/g, ' ').trim();
-                
-                // Bỏ qua các đoạn text quá ngắn hoặc vô nghĩa
-                if (text && text.length > 2) {
-                    cleanHtml += `<${tagName}>${text}</${tagName}>\n`;
-                    plainText += text + '\n';
+            let rawHtml = $container.html();
+            // Xóa comment HTML và thẻ rác MS Word
+            rawHtml = rawHtml.replace(/<!--[\s\S]*?-->/g, '');
+            rawHtml = rawHtml.replace(/<(?:o|w|m|v):[\s\S]*?>[\s\S]*?<\/(?:o|w|m|v):[\s\S]*?>/g, '');
+            
+            // 3. LÀM SẠCH THUỘC TÍNH NHƯNG GIỮ NGUYÊN CẤU TRÚC (Bảng, Danh sách)
+            const $clean = cheerio.load(rawHtml, null, false); // false để không tự động bọc <html><body>
+            
+            // Chỉ giữ lại các thuộc tính quan trọng để duy trì cấu trúc
+            const ALLOWED_ATTRIBS = ['colspan', 'rowspan', 'href'];
+            
+            $clean('*').each(function() {
+                if (this.attribs) {
+                    for (const attr in this.attribs) {
+                        if (!ALLOWED_ATTRIBS.includes(attr.toLowerCase())) {
+                            $clean(this).removeAttr(attr);
+                        }
+                    }
                 }
             });
+            
+            cleanHtml = $clean.html().replace(/\s+/g, ' ').trim();
+            
+            // Bổ sung xuống dòng cho các block để lấy plainText đẹp hơn
+            $clean('br').replaceWith('\n');
+            $clean('p, div, h1, h2, h3, h4, h5, h6, li, tr').append('\n');
+            plainText = $clean.text().replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, '\n\n').trim();
+        }
+        
+        // Nếu không có nội dung, báo lỗi ngầm định để bỏ qua nguồn này
+        if (!plainText || plainText.length < 200) {
+            console.warn(`⚠️ Crawled content too short or missing for ${finalUrl}`);
+            return null;
+        }
 
-            // Fallback: Nếu cách trên không lấy được gì (do trang web dùng <div> thay vì <p>)
-            if (cleanHtml.length < 100) {
-                $container.find('br').replaceWith('\n');
-                $container.find('div').append('\n');
-                const rawText = $container.text().replace(/[ \t]+/g, ' ').trim();
-                
-                const paragraphs = rawText.split(/\n+/).filter(p => p.trim().length > 10);
-                cleanHtml = paragraphs.map(p => `<p>${p.trim()}</p>`).join('\n');
-                plainText = paragraphs.join('\n');
-            }
-        }
-        
-        let content = cleanHtml;
-        let finalPlainText = plainText;
-        
-        // Cập nhật lại plain text nếu cần thiết
-        if (!finalPlainText && content) {
-            finalPlainText = cheerio.load(content).text().replace(/\s+/g, ' ').trim();
-        }
-        
         return {
             title: pageTitle,
-            content: content ? content.substring(0, 10000) : '',
-            textContent: finalPlainText.substring(0, 5000),
+            content: cleanHtml ? cleanHtml.substring(0, 15000) : '',
+            textContent: plainText.substring(0, 8000),
             finalUrl: finalUrl
         };
     } catch (error) {
@@ -275,7 +285,7 @@ NHIỆM VỤ: Trả lời câu hỏi dựa trên CONTEXT và HISTORY.
 
 QUY TẮC ƯU TIÊN:
 1. SỬ DỤNG CONTEXT: Đây là các bài viết chính thống trong hệ thống của chúng ta. Bạn PHẢI ưu tiên sử dụng thông tin từ CONTEXT để trả lời.
-2. CHỈ DÙNG GOOGLE KHI CẦN: Chỉ sử dụng Google Search nếu CONTEXT không chứa thông tin cụ thể hoặc câu hỏi yêu cầu dữ liệu mới nhất mà CONTEXT chưa cập nhật.
+2. NGUỒN GOOGLE CHÍNH THỐNG: Nếu phải dùng Google Search, hãy cố gắng ưu tiên lấy từ các trang: luatvietnam.vn, thuvienphapluat.vn (Ví dụ: tự động thêm "site:luatvietnam.vn OR site:thuvienphapluat.vn" vào truy vấn tìm kiếm ngầm của bạn).
 3. TÍNH CHÍNH XÁC: Tuyệt đối không nhầm lẫn giữa các quy định. Nếu CONTEXT nói về chủ đề A nhưng người dùng hỏi về chủ đề B, hãy sử dụng kiến thức chung hoặc Google Search thay vì cố ép nội dung từ CONTEXT vào.
 
 PHONG CÁCH TRẢ LỜI:
@@ -292,6 +302,9 @@ ${context}
 Bạn là một trợ lý AI pháp luật thân thiện. 
 Hãy sử dụng kiến thức của bạn kết hợp với Google Search để trả lời NGẮN GỌN, TỰ NHIÊN như đang chat bình thường.
 Bám sát HISTORY nếu người dùng đang hỏi tiếp các ý trước.
+
+QUY TẮC TÌM KIẾM GOOGLE:
+- Bạn PHẢI ƯU TIÊN giới hạn kết quả tìm kiếm từ các trang web pháp luật chính thống như luatvietnam.vn hoặc thuvienphapluat.vn (Bằng cách tự động thêm "site:luatvietnam.vn OR site:thuvienphapluat.vn" vào từ khóa tìm kiếm của bạn).
 
 ---
 ${historyContext}
