@@ -315,7 +315,9 @@ ${historyContext}
                             console.log(`🕸️ Đang crawl ${rawChunks.length} nguồn từ Google...`);
                             const crawlPromises = rawChunks.map(async (chunk, index) => {
                                 const crawled = await crawlUrl(chunk.web.uri);
-                                if (crawled) {
+                                
+                                // CHỈ CHẤP NHẬN BÀI VIẾT LẤY ĐƯỢC "TOÀN BỘ NỘI DUNG" (Độ dài textContent > 600 ký tự)
+                                if (crawled && crawled.textContent && crawled.textContent.length > 600) {
                                     return {
                                         _id: `google-source-${index}-${Date.now()}`,
                                         title: crawled.title || chunk.web.title || "Nguồn từ Google",
@@ -323,8 +325,10 @@ ${historyContext}
                                         category: "Tham khảo Google",
                                         content: crawled.content || ""
                                     };
+                                } else {
+                                    console.log(`⏭️ Bỏ qua nguồn Google không đủ nội dung hoặc bị chặn: ${chunk.web.uri}`);
+                                    return null;
                                 }
-                                return null;
                             });
                             const crawledSources = (await Promise.all(crawlPromises)).filter(Boolean);
 
