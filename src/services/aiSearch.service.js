@@ -33,42 +33,65 @@ async function crawlUrl(url) {
             || $('meta[property="og:title"]').attr('content')
             || '';
         
-        // 2. Các Selector chuyên biệt cho trang luật Việt Nam (luatvietnam, thuvienphapluat, i-law, ...)
-        let content = $('.the-article-body').html() 
-            || $('.article-content').html() 
-            || $('.content-detail').html()
-            || $('.post-content').html() 
-            || $('.entry-content').html()
-            || $('#question-body').html()
-            || $('.content_detail').html()
-            || $('#content').html() 
-            || $('article').html() 
-            || $('main').html() 
-            || $('body').html();
-        
-        // 3. Làm sạch sâu nội dung
-        if (content) {
-            const $content = cheerio.load(content);
-            // Xóa rác bên trong nội dung đã lấy
-            $content('script, style, link, meta, xml, object, embed, .social-sticky, .adv-slot-wrapper, .ad-placeholder').remove();
+        // 2. Các Selector chuyên biệt cho trang luật Việt Nam
+        const containerSelectors = [
+            '.the-article-body', '.article-content', '.content-detail', 
+            '.post-content', '.entry-content', '#question-body', 
+            '.content_detail', '#content', 'article', 'main', 'body'
+        ];
+
+        let $container = null;
+        for (const selector of containerSelectors) {
+            const el = $(selector);
+            if (el.length > 0) {
+                $container = el.first();
+                break;
+            }
+        }
+
+        let cleanHtml = '';
+        let plainText = '';
+
+        if ($container) {
+            // Xóa rác bên trong container trước khi quét
+            $container.find('script, style, link, meta, xml, object, embed, noscript').remove();
             
-            // Xóa các comment HTML và rác từ MS Word (thường gặp ở các trang luật)
-            const cleanedHtml = $content.html()
-                .replace(/<!--[\s\S]*?-->/g, '') // Xóa comment
-                .replace(/<(?:o|w|m|v):[\s\S]*?>[\s\S]*?<\/(?:o|w|m|v):[\s\S]*?>/g, '') // Xóa các thẻ MS Office
-                .replace(/style="[\s\S]*?"/g, '') // Xóa inline style để giảm dung lượng và tránh lỗi hiển thị
-                .replace(/\s+/g, ' ')
-                .trim();
+            // CHỈ TRÍCH XUẤT CÁC THẺ VĂN BẢN (Whitelist Approach)
+            $container.find('p, h1, h2, h3, h4, h5, h6, li, td, th').each((i, el) => {
+                const tagName = el.tagName.toLowerCase();
+                let text = $(el).text().replace(/\s+/g, ' ').trim();
                 
-            content = cleanedHtml;
+                // Bỏ qua các đoạn text quá ngắn hoặc vô nghĩa
+                if (text && text.length > 2) {
+                    cleanHtml += `<${tagName}>${text}</${tagName}>\n`;
+                    plainText += text + '\n';
+                }
+            });
+
+            // Fallback: Nếu cách trên không lấy được gì (do trang web dùng <div> thay vì <p>)
+            if (cleanHtml.length < 100) {
+                $container.find('br').replaceWith('\n');
+                $container.find('div').append('\n');
+                const rawText = $container.text().replace(/[ \t]+/g, ' ').trim();
+                
+                const paragraphs = rawText.split(/\n+/).filter(p => p.trim().length > 10);
+                cleanHtml = paragraphs.map(p => `<p>${p.trim()}</p>`).join('\n');
+                plainText = paragraphs.join('\n');
+            }
         }
         
-        const textContent = content ? cheerio.load(content).text().replace(/\s+/g, ' ').trim() : '';
+        let content = cleanHtml;
+        let finalPlainText = plainText;
+        
+        // Cập nhật lại plain text nếu cần thiết
+        if (!finalPlainText && content) {
+            finalPlainText = cheerio.load(content).text().replace(/\s+/g, ' ').trim();
+        }
         
         return {
             title: pageTitle,
             content: content ? content.substring(0, 10000) : '',
-            textContent: textContent.substring(0, 5000),
+            textContent: finalPlainText.substring(0, 5000),
             finalUrl: finalUrl
         };
     } catch (error) {
