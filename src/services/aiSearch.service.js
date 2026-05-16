@@ -20,43 +20,55 @@ const axiosInstance = axios.create({
  */
 async function crawlUrl(url) {
     try {
-        // Follow redirect để lấy URL thực (đặc biệt cho Google grounding redirect)
         const response = await axiosInstance.get(url, { maxRedirects: 5 });
         const finalUrl = response.request?.res?.responseUrl || response.config?.url || url;
         const $ = cheerio.load(response.data);
         
-        // Loại bỏ các thẻ rác
-        $('script, style, nav, footer, header, ads, .ads, #ads, iframe, noscript, .sidebar, .menu, .breadcrumb, .related-posts').remove();
+        // 1. Loại bỏ các thành phần rác diện rộng
+        $('script, style, nav, footer, header, ads, .ads, #ads, iframe, noscript, .sidebar, .menu, .breadcrumb, .related-posts, .the-article-share, .the-article-meta, .the-article-toc, .author-item, .article-intro').remove();
         
-        // Trích xuất tiêu đề thực từ trang
+        // Trích xuất tiêu đề
         const pageTitle = $('h1').first().text().trim() 
             || $('title').text().trim()
             || $('meta[property="og:title"]').attr('content')
             || '';
         
-        // Lấy nội dung (ưu tiên các thẻ bài viết)
-        let content = $('article').html() 
+        // 2. Các Selector chuyên biệt cho trang luật Việt Nam (luatvietnam, thuvienphapluat, i-law, ...)
+        let content = $('.the-article-body').html() 
+            || $('.article-content').html() 
+            || $('.content-detail').html()
             || $('.post-content').html() 
             || $('.entry-content').html()
-            || $('.content-detail').html()
-            || $('.article-content').html()
+            || $('#question-body').html()
+            || $('.content_detail').html()
             || $('#content').html() 
+            || $('article').html() 
             || $('main').html() 
             || $('body').html();
         
-        // Làm sạch text
+        // 3. Làm sạch sâu nội dung
         if (content) {
             const $content = cheerio.load(content);
-            $content('script, style, nav, footer, header, ads, iframe').remove();
-            content = $content.html();
+            // Xóa rác bên trong nội dung đã lấy
+            $content('script, style, link, meta, xml, object, embed, .social-sticky, .adv-slot-wrapper, .ad-placeholder').remove();
+            
+            // Xóa các comment HTML và rác từ MS Word (thường gặp ở các trang luật)
+            const cleanedHtml = $content.html()
+                .replace(/<!--[\s\S]*?-->/g, '') // Xóa comment
+                .replace(/<(?:o|w|m|v):[\s\S]*?>[\s\S]*?<\/(?:o|w|m|v):[\s\S]*?>/g, '') // Xóa các thẻ MS Office
+                .replace(/style="[\s\S]*?"/g, '') // Xóa inline style để giảm dung lượng và tránh lỗi hiển thị
+                .replace(/\s+/g, ' ')
+                .trim();
+                
+            content = cleanedHtml;
         }
         
         const textContent = content ? cheerio.load(content).text().replace(/\s+/g, ' ').trim() : '';
         
         return {
             title: pageTitle,
-            content: content ? content.substring(0, 8000) : '',
-            textContent: textContent.substring(0, 3000),
+            content: content ? content.substring(0, 10000) : '',
+            textContent: textContent.substring(0, 5000),
             finalUrl: finalUrl
         };
     } catch (error) {
