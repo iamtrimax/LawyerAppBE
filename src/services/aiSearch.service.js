@@ -143,43 +143,73 @@ const aiSearch = async (query, history = []) => {
             }
         }
 
-        // 1. Generate Embedding for the query
+        // 1. DIRECT TITLE SEARCH (Ưu tiên khớp tiêu đề)
+        let articles = [];
+        try {
+            const titleMatches = await Article.find({
+                title: { $regex: query.trim(), $options: 'i' }
+            }).select('title content category sourceUrl')
+              .limit(3);
+            
+            if (titleMatches.length > 0) {
+                articles = titleMatches.map(art => ({
+                    ...art.toObject(),
+                    similarity: 1.0, // Gán độ tương đồng tối đa cho khớp tiêu đề
+                    matchType: 'title'
+                }));
+                console.log(`🔍 Found ${articles.length} articles by Title Match`);
+            }
+        } catch (titleError) {
+            console.warn("⚠️ Title search failed, continuing with Vector search.");
+        }
+
+        // 2. VECTOR SEARCH (Tìm theo ý nghĩa nếu chưa đủ hoặc để bổ sung)
         let queryEmbedding = null;
         try {
             queryEmbedding = await generateEmbedding(query);
         } catch (embedError) {
-            console.warn("⚠️ Embedding generation failed (likely quota), continuing with Text Search.");
+            console.warn("⚠️ Embedding generation failed, continuing with current results.");
         }
 
-        let articles = [];
-
         if (queryEmbedding) {
-            const vectorStartTime = Date.now();
             if (vectorCache.length === 0) await initializeVectorCache();
 
             if (vectorCache.length > 0) {
-                const SIMILARITY_THRESHOLD = 0.9; // Ngưỡng tối thiểu để coi là liên quan (Yêu cầu chính xác cao)
+                const SIMILARITY_THRESHOLD = 0.85; 
                 const ranked = vectorCache.map(doc => ({
                     _id: doc._id,
                     similarity: cosineSimilarity(queryEmbedding, doc.embedding)
                 }))
-                .filter(r => r.similarity >= SIMILARITY_THRESHOLD) // Loại bỏ các kết quả độ tương đồng thấp
+                .filter(r => r.similarity >= SIMILARITY_THRESHOLD)
                 .sort((a, b) => b.similarity - a.similarity)
-                .slice(0, 2);
+                .slice(0, 3);
 
                 if (ranked.length > 0) {
                     const topIds = ranked.map(r => r._id);
                     const topArticles = await Article.find({ _id: { $in: topIds } })
                         .select('title content category sourceUrl');
 
-                    articles = topArticles.map(art => {
-                        const plainArt = art.toObject();
-                        const rank = ranked.find(r => r._id.toString() === art._id.toString());
-                        return { ...plainArt, similarity: rank ? rank.similarity : 0 };
-                    }).sort((a, b) => b.similarity - a.similarity);
+                    topArticles.forEach(art => {
+                        // Tránh trùng lặp với kết quả tìm theo tiêu đề
+                        if (!articles.find(a => a._id.toString() === art._id.toString())) {
+                            const rank = ranked.find(r => r._id.toString() === art._id.toString());
+                            articles.push({
+                                ...art.toObject(),
+                                similarity: rank ? rank.similarity : 0,
+                                matchType: 'vector'
+                            });
+                        }
+                    });
                 }
             }
         }
+
+        // Sắp xếp lại: Khớp tiêu đề lên trước, sau đó đến độ tương đồng vector
+        articles.sort((a, b) => {
+            if (a.matchType === 'title' && b.matchType !== 'title') return -1;
+            if (a.matchType !== 'title' && b.matchType === 'title') return 1;
+            return b.similarity - a.similarity;
+        });
 
         // Text search fallback đã bị loại bỏ vì trả về nguồn không liên quan.
         // Nếu vector search không tìm thấy (ngưỡng 90%), Google Search sẽ bổ sung.
@@ -208,17 +238,19 @@ const aiSearch = async (query, history = []) => {
 Bạn là một trợ lý AI pháp luật thân thiện. 
 NHIỆM VỤ: Trả lời câu hỏi dựa trên CONTEXT và HISTORY.
 
+QUY TẮC ƯU TIÊN:
+1. SỬ DỤNG CONTEXT: Đây là các bài viết chính thống trong hệ thống của chúng ta. Bạn PHẢI ưu tiên sử dụng thông tin từ CONTEXT để trả lời.
+2. CHỈ DÙNG GOOGLE KHI CẦN: Chỉ sử dụng Google Search nếu CONTEXT không chứa thông tin cụ thể hoặc câu hỏi yêu cầu dữ liệu mới nhất mà CONTEXT chưa cập nhật.
+3. TÍNH CHÍNH XÁC: Tuyệt đối không nhầm lẫn giữa các quy định. Nếu CONTEXT nói về chủ đề A nhưng người dùng hỏi về chủ đề B, hãy sử dụng kiến thức chung hoặc Google Search thay vì cố ép nội dung từ CONTEXT vào.
+
 PHONG CÁCH TRẢ LỜI:
-1. NGẮN GỌN & ĐÚNG TRỌNG TÂM: Không giải thích dài dòng, không lặp lại toàn bộ dữ liệu. Trả lời thẳng vào vấn đề.
-2. TỰ NHIÊN: Trò chuyện như hai người bình thường. Tránh dùng các cụm từ máy móc như "Dựa trên ngữ cảnh được cung cấp...".
-3. TRỰC TIẾP: Nếu CONTEXT có câu trả lời, hãy nói ngay kết quả.
-4. TRA CỨU: Bạn có quyền sử dụng Google Search để cập nhật thông tin mới nhất. Chỉ sử dụng CONTEXT nếu nó thực sự chứa thông tin về câu hỏi.
-5. CHÍNH XÁC: Tuyệt đối không dẫn lời hoặc sử dụng tài liệu trong CONTEXT nếu nội dung không khớp với chủ đề người dùng đang hỏi.
-6. NẾU CÓ TIẾP NỐI: Bám sát mạch hội thoại trong HISTORY.
+1. NGẮN GỌN & ĐÚNG TRỌNG TÂM.
+2. TỰ NHIÊN: Trò chuyện như người bình thường, không máy móc.
+3. BÁM SÁT HISTORY: Nếu có câu hỏi tiếp nối.
 
 ---
 ${historyContext}
-CONTEXT:
+CONTEXT (ƯU TIÊN):
 ${context}
 ---
 ` : `
@@ -353,7 +385,6 @@ ${historyContext}
         const stopWords = ['trong', 'của', 'theo', 'được', 'những', 'các', 'một', 'cho', 'này', 'với', 'đến', 'từ', 'là', 'và', 'hoặc', 'không', 'có', 'tại', 'về', 'phần', 'điều', 'khoản', 'quy', 'định', 'hướng', 'dẫn', 'thi', 'hành'];
         
         const filterRelevantSources = (sources, query, answer) => {
-            // Trích xuất từ khóa chủ đề (loại bỏ stop words tiếng Việt)
             const queryKeywords = query.toLowerCase().split(/\s+/)
                 .filter(w => w.length > 2 && !stopWords.includes(w));
             
@@ -361,12 +392,22 @@ ${historyContext}
                 const titleLower = (source.title || "").toLowerCase();
                 const id = source._id?.toString() || '';
                 
-                // Nguồn Google đã crawl thành công (có title thực) -> giữ lại
-                if (id.startsWith('google-source-') && titleLower.length > 5) return true;
+                // 1. Nếu là nguồn nội bộ và đã đạt ngưỡng tương đồng vector cao -> Giữ lại
+                // (Chỉ lọc thêm nếu query keywords rất đặc thù)
+                if (!id.startsWith('google-source-')) {
+                    const matchCount = queryKeywords.filter(kw => titleLower.includes(kw)).length;
+                    // Nếu có ít nhất 1 từ khóa quan trọng hoặc độ tương đồng vector đã đảm bảo
+                    return matchCount >= 1 || queryKeywords.length === 0;
+                }
                 
-                // Với nguồn nội bộ: yêu cầu ÍT NHẤT 2 từ khóa chủ đề trùng khớp
-                const matchCount = queryKeywords.filter(kw => titleLower.includes(kw)).length;
-                return matchCount >= 2;
+                // 2. Nếu là nguồn Google: Kiểm tra độ liên quan kỹ hơn
+                if (id.startsWith('google-source-')) {
+                    if (titleLower.length < 5) return false;
+                    const matchCount = queryKeywords.filter(kw => titleLower.includes(kw)).length;
+                    return matchCount >= 2; // Nguồn Google phải khớp ít nhất 2 từ khóa
+                }
+                
+                return false;
             });
         };
 
