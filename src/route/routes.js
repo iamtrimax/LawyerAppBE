@@ -53,6 +53,13 @@ const {
     downloadLegalFormController,
     getAiHistoryController
 } = require("../controller/legalAiChat.controller");
+const {
+    getCallLogs,
+    createCallLog,
+    updateCallLog,
+    deleteCallLog,
+    clearCallLogs
+} = require("../controller/callLog.controller");
 
 const router = express.Router();
 
@@ -155,5 +162,12 @@ router.get("/legal/ai-chat/form-types", getFormTypesController);
 router.post("/legal/ai-chat", legalAiChatController);
 router.post("/legal/ai-chat/download", downloadLegalFormController);
 router.get("/legal/ai-chat/history", verifyAccessToken, getAiHistoryController);
+
+// Call Log routes
+router.get("/call-logs", verifyAccessToken, getCallLogs);
+router.post("/call-logs", verifyAccessToken, createCallLog);
+router.put("/call-logs/:id", verifyAccessToken, updateCallLog);
+router.delete("/call-logs/:id", verifyAccessToken, deleteCallLog);
+router.delete("/call-logs", verifyAccessToken, clearCallLogs);
 
 module.exports = router;

@@ -4,6 +4,7 @@ const { Server } = require("socket.io");
 const { saveMessage } = require("../services/chat.services");
 const User = require("../model/user.model");
 const { sendPushNotification } = require("../services/notification.services");
+const callLogServices = require("../services/callLog.services");
 
 let io;
 const userSockets = new Map(); // Link userId -> socket.id
@@ -62,13 +63,31 @@ const initSocket = (server) => {
             const { callerId, callerName, receiverId, type, offer } = data;
             const receiverSocketId = userSockets.get(receiverId);
 
+            // Tạo bản ghi nhật ký cuộc gọi ban đầu
+            let callLogId = null;
+            try {
+                if (callerId && receiverId && !callerId.toString().startsWith('guest_') && !receiverId.toString().startsWith('guest_')) {
+                    const log = await callLogServices.createCallLog({
+                        callerId,
+                        receiverId,
+                        type,
+                        status: 'missed',
+                        startTime: new Date()
+                    });
+                    if (log) callLogId = log._id;
+                }
+            } catch (err) {
+                console.error("Lỗi khi ghi call log ban đầu:", err);
+            }
+
             // 1. Lưu Offer vào bộ nhớ tạm để đồng bộ sau (Tránh gửi gói tin quá lớn qua Push)
             pendingOffersByReceiver.set(receiverId, {
                 callerId,
                 callerName,
                 callerSocketId: socket.id,
                 type,
-                offer
+                offer,
+                callLogId: callLogId ? callLogId.toString() : undefined
             });
 
             // 2. Gửi Push Notification SIÊU NHẸ (Không kèm offer) để đảm bảo Android/iOS không chặn
@@ -84,6 +103,7 @@ const initSocket = (server) => {
                             callerId,
                             callerName,
                             type,
+                            callLogId: callLogId ? callLogId.toString() : undefined,
                             // CHÚ Ý: Không gửi offer ở đây để tối ưu dung lượng tin nhắn Push
                             action: "incoming-call"
                         }
@@ -100,22 +120,42 @@ const initSocket = (server) => {
                     callerName,
                     callerSocketId: socket.id,
                     type,
-                    offer
+                    offer,
+                    callLogId: callLogId ? callLogId.toString() : undefined
                 });
             }
         });
 
         // Người nhận chấp nhận cuộc gọi
-        socket.on("accept-call", (data) => {
-            const { callerId, answer } = data;
+        socket.on("accept-call", async (data) => {
+            const { callerId, answer, callLogId } = data;
             const callerSocketId = userSockets.get(callerId);
 
             // Tìm UserId của người chấp nhận để dọn dẹp hàng chờ
+            let receiverId = null;
             for (let [uid, sid] of userSockets.entries()) {
                 if (sid === socket.id) {
+                    receiverId = uid;
                     pendingOffersByReceiver.delete(uid);
                     break;
                 }
+            }
+
+            // Cập nhật cuộc gọi thành 'connected'
+            try {
+                if (callLogId) {
+                    await callLogServices.updateCallLog(callLogId, {
+                        status: 'connected',
+                        startTime: new Date()
+                    });
+                } else if (callerId && receiverId) {
+                    await callLogServices.updateLatestCallLog(callerId, receiverId, {
+                        status: 'connected',
+                        startTime: new Date()
+                    });
+                }
+            } catch (err) {
+                console.error("Lỗi khi cập nhật accept-call log:", err);
             }
 
             if (callerSocketId) {
@@ -124,16 +164,35 @@ const initSocket = (server) => {
         });
 
         // Người nhận từ chối cuộc gọi
-        socket.on("reject-call", (data) => {
-            const { callerId } = data;
+        socket.on("reject-call", async (data) => {
+            const { callerId, callLogId } = data;
             const callerSocketId = userSockets.get(callerId);
 
             // Dọn dẹp hàng chờ
+            let receiverId = null;
             for (let [uid, sid] of userSockets.entries()) {
                 if (sid === socket.id) {
+                    receiverId = uid;
                     pendingOffersByReceiver.delete(uid);
                     break;
                 }
+            }
+
+            // Cập nhật cuộc gọi thành 'rejected'
+            try {
+                if (callLogId) {
+                    await callLogServices.updateCallLog(callLogId, {
+                        status: 'rejected',
+                        endTime: new Date()
+                    });
+                } else if (callerId && receiverId) {
+                    await callLogServices.updateLatestCallLog(callerId, receiverId, {
+                        status: 'rejected',
+                        endTime: new Date()
+                    });
+                }
+            } catch (err) {
+                console.error("Lỗi khi cập nhật reject-call log:", err);
             }
 
             if (callerSocketId) {
@@ -156,11 +215,55 @@ const initSocket = (server) => {
 
         // Kết thúc cuộc gọi
         socket.on("hang-up", async (data) => {
-            const { targetId } = data;
+            const { targetId, callLogId } = data;
             const targetSocketId = userSockets.get(targetId) || targetId;
 
             // 1. Dọn dẹp hàng chờ
             pendingOffersByReceiver.delete(targetId);
+
+            // Tìm UserId của người gọi (người kích hoạt hang-up là socket.id)
+            let selfUserId = null;
+            for (let [uid, sid] of userSockets.entries()) {
+                if (sid === socket.id) {
+                    selfUserId = uid;
+                    break;
+                }
+            }
+
+            // Tìm UserId của target
+            let targetUserId = targetId;
+            for (let [uid, sid] of userSockets.entries()) {
+                if (sid === targetId) {
+                    targetUserId = uid;
+                    break;
+                }
+            }
+
+            // Cập nhật cuộc gọi thành 'ended' hoặc tính toán duration
+            try {
+                const endTime = new Date();
+                if (callLogId) {
+                    const log = await callLogServices.updateCallLog(callLogId, { endTime });
+                    if (log && log.status === 'connected') {
+                        await callLogServices.updateCallLog(callLogId, { status: 'ended' });
+                    }
+                } else if (selfUserId && targetUserId) {
+                    // Cố gắng tìm cuộc gọi theo cả 2 hướng và cập nhật kết thúc
+                    const log1 = await callLogServices.updateLatestCallLog(selfUserId, targetUserId, { endTime });
+                    if (log1) {
+                        if (log1.status === 'connected') {
+                            await callLogServices.updateCallLog(log1._id, { status: 'ended' });
+                        }
+                    } else {
+                        const log2 = await callLogServices.updateLatestCallLog(targetUserId, selfUserId, { endTime });
+                        if (log2 && log2.status === 'connected') {
+                            await callLogServices.updateCallLog(log2._id, { status: 'ended' });
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Lỗi khi cập nhật hang-up log:", err);
+            }
 
             // 2. Gửi qua Socket nếu đối phương đang online
             if (targetSocketId) {
