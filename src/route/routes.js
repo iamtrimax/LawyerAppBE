@@ -132,7 +132,7 @@ router.put("/lawyer/forms/update/:id", verifyAccessToken, verifyLawyer, updateMy
 router.delete("/lawyer/forms/delete/:id", verifyAccessToken, verifyLawyer, deleteMyFormController);
 
 // admin routes
-router.post("/approve-lawyer/*lawyerId", verifyAccessToken, verifyAdmin, authLimiter, aprroveLawyerController);
+router.post("/approve-lawyer", verifyAccessToken, verifyAdmin, authLimiter, aprroveLawyerController);
 router.get("/admin/lawyer-detail/:lawyerId", verifyAccessToken, verifyAdmin, getLawyerDetailForAdminController);
 
 // Admin Legal Resource Management

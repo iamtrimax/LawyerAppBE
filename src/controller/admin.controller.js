@@ -27,7 +27,7 @@ const getLawyerDetailForAdminController = async (req, res) => {
 };
 
 const aprroveLawyerController = async (req, res) => {
-  const { lawyerId } = req.params;
+  const { lawyerId } = req.body;
   try {
     const approvedLawyer = await approveLawyer(lawyerId);
     if (!approvedLawyer) {
