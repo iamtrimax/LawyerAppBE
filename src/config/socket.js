@@ -24,6 +24,19 @@ const initSocket = (server) => {
         // Đăng ký UserId với SocketId (Hỗ trợ cả Guest ID)
         socket.on("register", (userId) => {
             if (!userId) return;
+            
+            // 1. Kiểm tra xem người dùng này đã có socket (thiết bị) khác đang kết nối chưa
+            const existingSocketId = userSockets.get(userId.toString());
+            
+            // Nếu có và khác với socket ID hiện tại, force_logout thiết bị cũ
+            if (existingSocketId && existingSocketId !== socket.id) {
+                io.to(existingSocketId).emit('force_logout', {
+                    reason: 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc hiện tại sẽ bị đăng xuất.'
+                });
+                console.log(`Force logout sent to device ${existingSocketId} for user ${userId}`);
+            }
+
+            // 2. Cập nhật thiết bị mới nhất vào map
             userSockets.set(userId.toString(), socket.id);
             console.log(`User/Guest ${userId} registered with socket ${socket.id}`);
 
