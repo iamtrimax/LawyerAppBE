@@ -22,10 +22,13 @@ const sendPushNotification = async (pushToken, title, body, data = {}) => {
         title: title,
         body: body,
         data: data,
-        // QUAN TRỌNG: Thêm dòng này để hiển thị nút Chấp nhận/Từ chối ở Client
-        categoryIdentifier: "incoming-call", 
         priority: "high",
     }];
+
+    // Chỉ thêm categoryIdentifier nếu hành động là cuộc gọi đến
+    if (data && data.action === "incoming-call") {
+        messages[0].categoryIdentifier = "incoming-call";
+    }
 
     let chunks = expo.chunkPushNotifications(messages);
     for (let chunk of chunks) {

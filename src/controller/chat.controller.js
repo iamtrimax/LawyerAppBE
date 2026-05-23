@@ -178,7 +178,7 @@ const sendMessageController = async (req, res) => {
                                 participant.expoPushToken,
                                 `Tin nhắn mới từ ${senderName}`,
                                 notifyText,
-                                { type: 'chat', conversationID }
+                                { type: 'chat', conversationID, senderID: senderID.toString(), senderName }
                             ).catch(err => console.error("Push error:", err));
                         }
                     }
