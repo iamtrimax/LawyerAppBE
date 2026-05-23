@@ -354,6 +354,42 @@ const initSocket = (server) => {
                 io.to(conversationID).emit("receive_message", savedMsg);
 
                 console.log(`Message sent in room ${conversationID}`);
+
+                // Gửi Push Notification cho người nhận
+                try {
+                    const chatConversationModel = require("../model/chatConversation.model");
+                    const sender = await User.findById(senderID);
+                    const conversation = await chatConversationModel.findById(conversationID).populate('participants');
+
+                    if (conversation && conversation.participants) {
+                        const senderName = sender ? sender.fullname : "Người dùng";
+                        const notifyText = text || "Bạn có một tin nhắn mới";
+
+                        conversation.participants.forEach(participant => {
+                            const participantIDStr = participant._id.toString();
+                            if (participantIDStr !== senderID.toString()) {
+                                // Gửi socket event cập nhật conversation list
+                                io.to(participantIDStr).emit("update_conversation_list", {
+                                    conversationID,
+                                    message: savedMsg,
+                                    senderName
+                                });
+
+                                // Gửi thông báo đẩy (nếu offline/chưa mở app)
+                                if (participant.expoPushToken) {
+                                    sendPushNotification(
+                                        participant.expoPushToken,
+                                        `Tin nhắn mới từ ${senderName}`,
+                                        notifyText,
+                                        { type: 'chat', conversationID, senderID: senderID.toString(), senderName }
+                                    ).catch(err => console.error("Push error:", err));
+                                }
+                            }
+                        });
+                    }
+                } catch (pushErr) {
+                    console.error("Socket send push notification error:", pushErr);
+                }
             } catch (error) {
                 console.error("Socket send_message error:", error);
                 socket.emit("error", { message: "Gửi tin nhắn thất bại" });
