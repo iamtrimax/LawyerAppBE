@@ -18,7 +18,7 @@ const sendPushNotification = async (pushToken, title, body, data = {}) => {
 
     const messages = [{
         to: pushToken,
-        sound: "default",
+        sound: (data && data.type === 'chat') ? "message.mp3" : "default",
         title: title,
         body: body,
         data: data,
