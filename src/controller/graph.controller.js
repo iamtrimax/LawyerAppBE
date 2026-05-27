@@ -3,9 +3,6 @@ const { extractGraphFromArticle } = require('../services/graphExtraction.service
 const { graphSearch } = require('../services/graphSearch.service');
 const { getDriver } = require('../config/neo4j');
 
-/**
- * Trích xuất đồ thị cho tất cả bài viết/văn bản pháp luật hiện có trong MongoDB
- */
 const buildGraphForAllArticles = async (req, res) => {
     try {
         console.log("🚀 [GraphController] Bắt đầu xây dựng đồ thị cho tất cả bài viết...");
@@ -15,14 +12,22 @@ const buildGraphForAllArticles = async (req, res) => {
             message: "Tiến trình xây dựng đồ thị toàn bộ bài viết đã bắt đầu trong background."
         });
 
-        // Tìm tất cả các bài viết hợp lệ
-        const articles = await Article.find({ status: 'Published' });
-        console.log(`📊 [GraphController] Tìm thấy ${articles.length} bài viết cần xử lý.`);
+        // Đếm tổng số bài viết trước
+        const totalArticles = await Article.countDocuments({ status: 'Published' });
+        console.log(`📊 [GraphController] Tìm thấy tổng cộng ${totalArticles} bài viết cần xử lý.`);
+
+        // Sử dụng cursor để stream dữ liệu từ MongoDB thay vì load toàn bộ 2700+ docs có trường nội dung rất lớn vào RAM cùng một lúc
+        const cursor = Article.find({ status: 'Published' })
+            .select('title content textContent status')
+            .cursor();
 
         let successCount = 0;
         let failCount = 0;
+        let processedCount = 0;
 
-        for (let article of articles) {
+        for (let article = await cursor.next(); article != null; article = await cursor.next()) {
+            processedCount++;
+            console.log(`⏳ [GraphController] Processing [${processedCount}/${totalArticles}] - ID: ${article._id}`);
             try {
                 const result = await extractGraphFromArticle(article);
                 if (result) {
@@ -34,6 +39,10 @@ const buildGraphForAllArticles = async (req, res) => {
                 console.error(`❌ [GraphController] Lỗi xử lý bài viết ${article._id}:`, err.message);
                 failCount++;
             }
+
+            // Giải phóng tham chiếu bộ nhớ thủ công để giúp V8 Garbage Collector
+            article = null;
+
             // Tránh rate limit của Gemini API
             await new Promise(r => setTimeout(r, 1000));
         }
