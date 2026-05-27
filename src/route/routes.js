@@ -145,6 +145,13 @@ router.post("/admin/legal-forms", verifyAccessToken, verifyAdmin, createFormCont
 router.put("/admin/legal-forms/:id", verifyAccessToken, verifyAdmin, updateFormController);
 router.delete("/admin/legal-forms/:id", verifyAccessToken, verifyAdmin, deleteFormController);
 
+// GraphRAG Management
+const { buildGraphForAllArticles, buildGraphForArticle, testQueryGraph, clearAllGraphData } = require("../controller/graph.controller");
+router.post("/admin/graph/build-all", verifyAccessToken, verifyAdmin, buildGraphForAllArticles);
+router.post("/admin/graph/build-article/:articleId", verifyAccessToken, verifyAdmin, buildGraphForArticle);
+router.post("/admin/graph/test-query", testQueryGraph);
+router.delete("/admin/graph/clear", verifyAccessToken, verifyAdmin, clearAllGraphData);
+
 // payment routes
 router.post("/payment/sepay-webhook", handleSePayWebhookController);
 router.post("/payment/create-url", verifyAccessToken, paymentLimiter, createPaymentLinkController);

@@ -268,17 +268,24 @@ const syncVbplData = async () => {
                 for (const doc of documents) {
                     try {
                         const details = await parseDocumentDetails(doc.url, doc.title, categoryName);
-                        if (details) {
                             const updatedDoc = await articleModel.findOneAndUpdate(
                                 { sourceUrl: doc.url },
                                 { $set: details },
                                 { upsert: true, new: true }
                             );
-                            if (updatedDoc && updatedDoc.embedding) {
-                                updateVectorCache(updatedDoc._id, updatedDoc.embedding);
+                            if (updatedDoc) {
+                                if (updatedDoc.embedding) {
+                                    updateVectorCache(updatedDoc._id, updatedDoc.embedding);
+                                }
+                                // Xây dựng đồ thị Neo4j cho văn bản mới crawl này
+                                try {
+                                    const { extractGraphFromArticle } = require('./graphExtraction.service');
+                                    await extractGraphFromArticle(updatedDoc);
+                                } catch (graphErr) {
+                                    console.error(`  [Neo4j Hook] Lỗi xây dựng đồ thị cho ${updatedDoc._id}:`, graphErr.message);
+                                }
                             }
                             totalSaved++;
-                        }
                         await new Promise(r => setTimeout(r, 200));
                     } catch (err) {
                         console.error(`  Lỗi xử lý ${doc.url}:`, err.message);

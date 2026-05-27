@@ -1,6 +1,8 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Article = require('../model/article.model');
 const { generateEmbedding } = require('./embedding.service');
+const { graphSearch } = require('./graphSearch.service');
+
 const NodeCache = require('node-cache');
 const axios = require('axios');
 const cheerio = require('cheerio');
@@ -188,84 +190,109 @@ const aiSearch = async (query, history = []) => {
             }
         }
 
-        // 1. DIRECT TITLE SEARCH (Ưu tiên khớp tiêu đề)
+        // 1. CHẠY GRAPHRAG (NEO4J + VECTOR HYBRID)
+        let graphResults = [];
+        try {
+            graphResults = await graphSearch(query);
+            console.log(`🧠 [GraphRAG] Tìm thấy ${graphResults.length} ngữ cảnh đồ thị liên quan.`);
+        } catch (graphError) {
+            console.warn("⚠️ [GraphRAG] Lỗi truy xuất Neo4j, sử dụng RAG thuần làm fallback:", graphError.message);
+        }
+
         let articles = [];
-        try {
-            const titleMatches = await Article.find({
-                title: { $regex: query.trim(), $options: 'i' }
-            }).select('title content category sourceUrl')
-              .limit(3);
-            
-            if (titleMatches.length > 0) {
-                articles = titleMatches.map(art => ({
-                    ...art.toObject(),
-                    similarity: 1.0, // Gán độ tương đồng tối đa cho khớp tiêu đề
-                    matchType: 'title'
-                }));
-                console.log(`🔍 Found ${articles.length} articles by Title Match`);
+        let context = "";
+
+        if (graphResults.length > 0) {
+            // Dựng ngữ cảnh trực tiếp từ GraphRAG mở rộng
+            context = "Dưới đây là một số thông tin từ cấu trúc đồ thị pháp luật tìm thấy:\n\n";
+            graphResults.forEach((res, index) => {
+                context += `[Tài liệu ${index + 1}]:\n${res.fullContext}\n`;
+                // Mock cấu trúc article để trả về reference sources thống nhất
+                articles.push({
+                    _id: res.mongoId,
+                    title: res.title,
+                    content: res.content,
+                    category: "Đồ thị Pháp luật",
+                    sourceUrl: "" // Sẽ map sau từ MongoDB nếu cần hoặc để trống
+                });
+            });
+        } else {
+            // FALLBACK: RAG THUẦN (VECTOR SEARCH + TITLE MATCH CŨ)
+            console.log("ℹ️ [Fallback RAG] Thực hiện tìm kiếm RAG thuần...");
+            // 1. DIRECT TITLE SEARCH (Ưu tiên khớp tiêu đề)
+            try {
+                const titleMatches = await Article.find({
+                    title: { $regex: query.trim(), $options: 'i' }
+                }).select('title content category sourceUrl')
+                  .limit(3);
+                
+                if (titleMatches.length > 0) {
+                    articles = titleMatches.map(art => ({
+                        ...art.toObject(),
+                        similarity: 1.0, // Gán độ tương đồng tối đa cho khớp tiêu đề
+                        matchType: 'title'
+                    }));
+                    console.log(`🔍 Found ${articles.length} articles by Title Match`);
+                }
+            } catch (titleError) {
+                console.warn("⚠️ Title search failed, continuing with Vector search.");
             }
-        } catch (titleError) {
-            console.warn("⚠️ Title search failed, continuing with Vector search.");
-        }
 
-        // 2. VECTOR SEARCH (Tìm theo ý nghĩa nếu chưa đủ hoặc để bổ sung)
-        let queryEmbedding = null;
-        try {
-            queryEmbedding = await generateEmbedding(query);
-        } catch (embedError) {
-            console.warn("⚠️ Embedding generation failed, continuing with current results.");
-        }
+            // 2. VECTOR SEARCH (Tìm theo ý nghĩa nếu chưa đủ hoặc để bổ sung)
+            let queryEmbedding = null;
+            try {
+                queryEmbedding = await generateEmbedding(query);
+            } catch (embedError) {
+                console.warn("⚠️ Embedding generation failed, continuing with current results.");
+            }
 
-        if (queryEmbedding) {
-            if (vectorCache.length === 0) await initializeVectorCache();
+            if (queryEmbedding) {
+                if (vectorCache.length === 0) await initializeVectorCache();
 
-            if (vectorCache.length > 0) {
-                const SIMILARITY_THRESHOLD = 0.85; 
-                const ranked = vectorCache.map(doc => ({
-                    _id: doc._id,
-                    similarity: cosineSimilarity(queryEmbedding, doc.embedding)
-                }))
-                .filter(r => r.similarity >= SIMILARITY_THRESHOLD)
-                .sort((a, b) => b.similarity - a.similarity)
-                .slice(0, 3);
+                if (vectorCache.length > 0) {
+                    const SIMILARITY_THRESHOLD = 0.85; 
+                    const ranked = vectorCache.map(doc => ({
+                        _id: doc._id,
+                        similarity: cosineSimilarity(queryEmbedding, doc.embedding)
+                    }))
+                    .filter(r => r.similarity >= SIMILARITY_THRESHOLD)
+                    .sort((a, b) => b.similarity - a.similarity)
+                    .slice(0, 3);
 
-                if (ranked.length > 0) {
-                    const topIds = ranked.map(r => r._id);
-                    const topArticles = await Article.find({ _id: { $in: topIds } })
-                        .select('title content category sourceUrl');
+                    if (ranked.length > 0) {
+                        const topIds = ranked.map(r => r._id);
+                        const topArticles = await Article.find({ _id: { $in: topIds } })
+                            .select('title content category sourceUrl');
 
-                    topArticles.forEach(art => {
-                        // Tránh trùng lặp với kết quả tìm theo tiêu đề
-                        if (!articles.find(a => a._id.toString() === art._id.toString())) {
-                            const rank = ranked.find(r => r._id.toString() === art._id.toString());
-                            articles.push({
-                                ...art.toObject(),
-                                similarity: rank ? rank.similarity : 0,
-                                matchType: 'vector'
-                            });
-                        }
-                    });
+                        topArticles.forEach(art => {
+                            // Tránh trùng lặp với kết quả tìm theo tiêu đề
+                            if (!articles.find(a => a._id.toString() === art._id.toString())) {
+                                const rank = ranked.find(r => r._id.toString() === art._id.toString());
+                                articles.push({
+                                    ...art.toObject(),
+                                    similarity: rank ? rank.similarity : 0,
+                                    matchType: 'vector'
+                                });
+                            }
+                        });
+                    }
                 }
             }
+
+            // Sắp xếp lại: Khớp tiêu đề lên trước, sau đó đến độ tương đồng vector
+            articles.sort((a, b) => {
+                if (a.matchType === 'title' && b.matchType !== 'title') return -1;
+                if (a.matchType !== 'title' && b.matchType === 'title') return 1;
+                return b.similarity - a.similarity;
+            });
+
+            context = "Dưới đây là một số thông tin từ các văn bản pháp luật tìm thấy:\n\n";
+            articles.forEach((art, index) => {
+                context += `[Tài liệu ${index + 1}]:\nTiêu đề: ${art.title}\nNội dung: ${art.content.replace(/<[^>]*>?/gm, '').substring(0, 1500)}...\n\n`;
+            });
         }
 
-        // Sắp xếp lại: Khớp tiêu đề lên trước, sau đó đến độ tương đồng vector
-        articles.sort((a, b) => {
-            if (a.matchType === 'title' && b.matchType !== 'title') return -1;
-            if (a.matchType !== 'title' && b.matchType === 'title') return 1;
-            return b.similarity - a.similarity;
-        });
-
-        // Text search fallback đã bị loại bỏ vì trả về nguồn không liên quan.
-        // Nếu vector search không tìm thấy (ngưỡng 90%), Google Search sẽ bổ sung.
-
         const hasLocalContext = articles.length > 0;
-
-        // 3. CONSTRUCT CONTEXT & HISTORY
-        let context = "Dưới đây là một số thông tin từ các văn bản pháp luật tìm thấy:\n\n";
-        articles.forEach((art, index) => {
-            context += `[Tài liệu ${index + 1}]:\nTiêu đề: ${art.title}\nNội dung: ${art.content.replace(/<[^>]*>?/gm, '').substring(0, 1500)}...\n\n`;
-        });
 
         // Định dạng lịch sử hội thoại
         let historyContext = "";
@@ -277,6 +304,7 @@ const aiSearch = async (query, history = []) => {
             });
             historyContext += "\n--- END HISTORY ---\n\n";
         }
+
 
         // 4. CONSTRUCT PROMPT
         const systemPrompt = hasLocalContext ? `

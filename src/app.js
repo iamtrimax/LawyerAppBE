@@ -10,6 +10,17 @@ const { initSocket } = require('./config/socket');
 const { initReminderCron } = require('./services/reminder.cron');
 const { initLegalSyncCron } = require('./services/legalSync.cron');
 const { initializeVectorCache } = require('./services/aiSearch.service');
+const { initNeo4j, closeNeo4j } = require('./config/neo4j');
+
+// Khởi tạo Neo4j connection pool
+initNeo4j();
+
+// Shutdown hook để dọn dẹp kết nối
+process.on('SIGINT', async () => {
+    await closeNeo4j();
+    process.exit(0);
+});
+
 
 app.use(cors());
 app.use(express.json()); // Cho phép nhận JSON body

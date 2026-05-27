@@ -157,6 +157,14 @@ const crawlAndSaveDocument = async (url, customTitle = null) => {
     if (updated && updated._id) {
         if (embedding) updateVectorCache(updated._id, embedding);
         console.log(`  ✅ Đã lưu thành công (với HTML)!`);
+        
+        // Xây dựng đồ thị Neo4j cho văn bản đất đai mới crawl này
+        try {
+            const { extractGraphFromArticle } = require('./graphExtraction.service');
+            await extractGraphFromArticle(updated);
+        } catch (graphErr) {
+            console.error(`  [Neo4j Hook] Lỗi xây dựng đồ thị cho ${updated._id}:`, graphErr.message);
+        }
     }
 
     return updated;
