@@ -27,15 +27,50 @@ const extractGraphFromArticle = async (article) => {
     while (attempt < maxAttempts && currentKeyIndex < apiKeys.length) {
         try {
             console.log(`ℹ️ [GraphExtraction] Đang phân tích bài viết: "${article.title}" (ID: ${article._id}) sử dụng Key #${currentKeyIndex + 1}`);
-            
             const activeKey = apiKeys[currentKeyIndex];
             const genAI = new GoogleGenerativeAI(activeKey);
+            
+            // Định nghĩa JSON Schema đầu ra bắt buộc cho Gemini
             const model = genAI.getGenerativeModel({
                 model: "gemini-2.5-flash",
                 generationConfig: {
-                    responseMimeType: "application/json"
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            nodes: {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        id: { type: "STRING" },
+                                        type: { type: "STRING" },
+                                        title: { type: "STRING" },
+                                        content: { type: "STRING" }
+                                    },
+                                    required: ["id", "type", "title", "content"]
+                                }
+                            },
+                            relationships: {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        source: { type: "STRING" },
+                                        target: { type: "STRING" },
+                                        type: { type: "STRING" }
+                                    },
+                                    required: ["source", "target", "type"]
+                                }
+                            }
+                        },
+                        required: ["nodes", "relationships"]
+                    }
                 }
             });
+
+        // Chỉ gửi tối đa 15000 ký tự nội dung để tránh vượt quá giới hạn token đầu ra
+        const contentToSend = (article.textContent || article.content || "").substring(0, 15000);
 
         const prompt = `
 Bạn là một chuyên gia pháp luật và xử lý dữ liệu.
@@ -44,7 +79,7 @@ Nhiệm vụ của bạn là phân tích văn bản pháp luật dưới đây v
 Văn bản pháp luật:
 Tiêu đề: ${article.title}
 Nội dung: 
-${article.textContent || article.content}
+${contentToSend}
 
 Yêu cầu đầu ra dạng JSON gồm 2 mảng chính:
 1. "nodes": Danh sách các thực thể (mức điều khoản hoặc văn bản lớn):
@@ -62,27 +97,22 @@ Yêu cầu đầu ra dạng JSON gồm 2 mảng chính:
 Quy tắc:
 - Hãy chia nhỏ văn bản đến mức "Khoản" (hoặc "Điểm" nếu có nội dung cụ thể rõ ràng).
 - Nếu phát hiện nội dung của Điều/Khoản có nhắc tới các Điều/Khoản khác trong chính văn bản này hoặc văn bản pháp luật khác, hãy tạo quan hệ "REFERENCES".
-- Trả về JSON theo đúng định dạng sau:
-{
-  "nodes": [
-     { "id": "chuoi_id", "type": "Article", "title": "...", "content": "..." }
-  ],
-  "relationships": [
-     { "source": "chuoi_id_1", "target": "chuoi_id_2", "type": "CONTAINS" }
-  ]
-}
+- Trả về JSON khớp chính xác theo schema được yêu cầu. Không được viết dở dang hoặc cắt ngắn kết quả JSON.
 `;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
-        const jsonText = response.text();
+        let jsonText = response.text();
         
         let graphData;
         try {
-            graphData = JSON.parse(jsonText);
+            // Tự động sửa lỗi JSON kết thúc dở dang (ví dụ: thiếu đóng ] hoặc } do hết ký tự tối đa)
+            const cleanJsonText = repairJson(jsonText);
+            graphData = JSON.parse(cleanJsonText);
         } catch (parseError) {
             console.error("❌ [GraphExtraction] Lỗi parse JSON từ Gemini:", parseError.message);
             console.log("Raw output:", jsonText);
+
             return null;
         }
 
@@ -224,6 +254,63 @@ const saveGraphToNeo4j = async (articleMongoId, graphData) => {
         await session.close();
     }
 };
+
+/**
+ * Tự động sửa lỗi chuỗi JSON bị ngắt quãng giữa chừng
+ */
+function repairJson(jsonStr) {
+    let clean = jsonStr.trim();
+    if (!clean) return '{}';
+    
+    // Nếu bị cắt ngang trong cặp nháy kép
+    let openQuotes = 0;
+    for (let i = 0; i < clean.length; i++) {
+        if (clean[i] === '"' && (i === 0 || clean[i-1] !== '\\')) {
+            openQuotes++;
+        }
+    }
+    
+    // Nếu số nháy kép là lẻ, chuỗi đang bị ngắt giữa chừng
+    if (openQuotes % 2 !== 0) {
+        clean += '"';
+    }
+    
+    // Bổ sung các dấu đóng ngoặc còn thiếu
+    let stack = [];
+    for (let i = 0; i < clean.length; i++) {
+        const char = clean[i];
+        if (char === '"' && (i === 0 || clean[i-1] !== '\\')) {
+            // Skip strings content
+            let nextQuote = clean.indexOf('"', i + 1);
+            while (nextQuote !== -1 && clean[nextQuote - 1] === '\\') {
+                nextQuote = clean.indexOf('"', nextQuote + 1);
+            }
+            if (nextQuote !== -1) {
+                i = nextQuote;
+            } else {
+                break;
+            }
+        } else if (char === '{' || char === '[') {
+            stack.push(char);
+        } else if (char === '}') {
+            if (stack[stack.length - 1] === '{') stack.pop();
+        } else if (char === ']') {
+            if (stack[stack.length - 1] === '[') stack.pop();
+        }
+    }
+    
+    // Đóng ngược từ stack
+    while (stack.length > 0) {
+        const last = stack.pop();
+        if (last === '{') {
+            clean += '}';
+        } else if (last === '[') {
+            clean += ']';
+        }
+    }
+    
+    return clean;
+}
 
 module.exports = {
     extractGraphFromArticle,
