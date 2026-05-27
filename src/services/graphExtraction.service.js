@@ -155,7 +155,7 @@ Quy tắc:
         console.log(`🧠 [GraphExtraction] Bắt đầu sinh embeddings cho ${graphData.nodes.length} nodes...`);
         for (let node of graphData.nodes) {
             const textToEmbed = `${node.title}. ${node.content}`;
-            node.embedding = await generateEmbedding(textToEmbed);
+            node.embedding = await generateEmbedding(textToEmbed, activeKey);
         }
 
         // Lưu vào Neo4j
