@@ -10,20 +10,32 @@ const getGenAI = () => {
     return new GoogleGenerativeAI(key);
 };
 
+// Lấy danh sách các API Keys khả dụng
+const getApiKeys = () => {
+    return (process.env.GEMINI_API_KEY || '').split(',').map(k => k.trim()).filter(Boolean);
+};
+
 /**
- * Trích xuất cấu trúc các điều khoản và quan hệ từ nội dung văn bản pháp luật bằng Gemini
+ * Trích xuất cấu trúc các điều khoản và quan hệ từ nội dung văn bản pháp luật bằng Gemini (Hỗ trợ Retry & Key Rotation)
  */
 const extractGraphFromArticle = async (article) => {
-    try {
-        console.log(`ℹ️ [GraphExtraction] Đang phân tích bài viết: "${article.title}" (ID: ${article._id})`);
-        
-        const genAI = getGenAI();
-        const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash",
-            generationConfig: {
-                responseMimeType: "application/json"
-            }
-        });
+    const apiKeys = getApiKeys();
+    let currentKeyIndex = 0;
+    let attempt = 0;
+    const maxAttempts = 5;
+    
+    while (attempt < maxAttempts && currentKeyIndex < apiKeys.length) {
+        try {
+            console.log(`ℹ️ [GraphExtraction] Đang phân tích bài viết: "${article.title}" (ID: ${article._id}) sử dụng Key #${currentKeyIndex + 1}`);
+            
+            const activeKey = apiKeys[currentKeyIndex];
+            const genAI = new GoogleGenerativeAI(activeKey);
+            const model = genAI.getGenerativeModel({
+                model: "gemini-2.5-flash",
+                generationConfig: {
+                    responseMimeType: "application/json"
+                }
+            });
 
         const prompt = `
 Bạn là một chuyên gia pháp luật và xử lý dữ liệu.
@@ -120,10 +132,27 @@ Quy tắc:
         await saveGraphToNeo4j(article._id.toString(), graphData);
 
         return graphData;
-    } catch (error) {
-        console.error("❌ [GraphExtraction] Lỗi trong quá trình trích xuất đồ thị:", error.message);
-        return null;
+        } catch (error) {
+            attempt++;
+            const errorMessage = error.message || '';
+            console.error(`❌ [GraphExtraction] Lỗi (Lần thử ${attempt}/${maxAttempts}):`, errorMessage);
+            
+            // Nếu lỗi do hết quota (429) hoặc quá tải (503), hãy đổi API Key tiếp theo
+            const isQuotaOrOverload = errorMessage.includes('429') || errorMessage.includes('Quota exceeded') || errorMessage.includes('503') || errorMessage.includes('high demand');
+            if (isQuotaOrOverload) {
+                currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
+                console.log(`🔄 [GraphExtraction] Đang xoay sang Gemini API Key tiếp theo (Key #${currentKeyIndex + 1})`);
+            }
+            
+            if (attempt < maxAttempts) {
+                const backoffDelay = Math.pow(2, attempt) * 1000;
+                console.log(`⏳ Đang đợi ${backoffDelay}ms trước khi thử lại...`);
+                await new Promise(r => setTimeout(r, backoffDelay));
+            }
+        }
     }
+    console.error(`❌ [GraphExtraction] Đã thử ${maxAttempts} lần đều thất bại cho bài viết ${article._id}`);
+    return null;
 };
 
 /**
