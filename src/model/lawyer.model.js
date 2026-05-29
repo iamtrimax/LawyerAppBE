@@ -16,6 +16,15 @@ const lawyerSchema = new mongoose.Schema({
   specialty: {
     type: [String],
     required: true,
+    enum: [
+      "Dân sự",
+      "Hình sự",
+      "Hôn nhân & Gia đình",
+      "Kinh doanh thương mại",
+      "Sở hữu trí tuệ",
+      "Đất đai",
+      "Luật thuế"
+    ]
   },
   firmName: {
     type: String,
