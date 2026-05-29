@@ -23,7 +23,8 @@ const lawyerSchema = new mongoose.Schema({
       "Kinh doanh thương mại",
       "Sở hữu trí tuệ",
       "Đất đai",
-      "Luật thuế"
+      "Luật thuế",
+      "Tư vấn luật theo yêu cầu"
     ]
   },
   firmName: {
