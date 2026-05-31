@@ -219,7 +219,7 @@ const confirmBookingPayment = async (lawyerId, bookingId) => {
 }
 
 const updateLawyerProfile = async (userId, lawyerId, updateData) => {
-  const { fullname, phone, avatar, specialty, firmName, bankInfo } = updateData;
+  const { fullname, phone, avatar, specialty, firmName, bankInfo, lawyerCardImage } = updateData;
 
   // 1. Cập nhật bảng User
   if (fullname || phone) {
@@ -237,6 +237,7 @@ const updateLawyerProfile = async (userId, lawyerId, updateData) => {
   }
   if (firmName) lawyerUpdate.firmName = firmName;
   if (bankInfo) lawyerUpdate.bankInfo = bankInfo;
+  if (lawyerCardImage) lawyerUpdate.lawyerCardImage = lawyerCardImage;
   if (Object.keys(lawyerUpdate).length > 0) {
     lawyerUpdate.isApproved = false;
     await lawyerModel.findByIdAndUpdate(lawyerId, lawyerUpdate);
