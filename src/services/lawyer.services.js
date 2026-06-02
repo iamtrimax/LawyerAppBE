@@ -17,7 +17,10 @@ const lawyerRegister = async (userData) => {
     firmName,
     lawyerCardImage,
     avatar,
-    bankInfo
+    bankInfo,
+    yearsOfExperience,
+    titleDegree,
+    operatingProvinces
   } = userData;
 
   // 1. Kiểm tra User tồn tại hay chưa
@@ -73,6 +76,11 @@ const lawyerRegister = async (userData) => {
     lawyerProfile.firmName = firmName;
     lawyerProfile.lawyerCardImage = lawyerCardImage;
     lawyerProfile.avatar = avatar;
+    if (yearsOfExperience !== undefined) lawyerProfile.yearsOfExperience = yearsOfExperience;
+    if (titleDegree !== undefined) lawyerProfile.titleDegree = titleDegree;
+    if (operatingProvinces !== undefined) {
+      lawyerProfile.operatingProvinces = Array.isArray(operatingProvinces) ? operatingProvinces : [operatingProvinces];
+    }
     if (bankInfo) lawyerProfile.bankInfo = bankInfo;
     await lawyerProfile.save();
     await client.del(`lawyer_detail:${user._id}`);
@@ -87,7 +95,10 @@ const lawyerRegister = async (userData) => {
       avatar,
       isCollaborator: user.isVerified && user.role === 'member', // Set collaborated if upgrading from member
       commissionRate: (user.isVerified && user.role === 'member') ? 20 : 0, // Default 20% commission for platform
-      bankInfo
+      bankInfo,
+      yearsOfExperience: yearsOfExperience || 0,
+      titleDegree: titleDegree || "",
+      operatingProvinces: Array.isArray(operatingProvinces) ? operatingProvinces : (operatingProvinces ? [operatingProvinces] : [])
     });
 
     // Nếu đang upgrade từ member, cập nhật role User sang lawyer ngay
@@ -219,7 +230,7 @@ const confirmBookingPayment = async (lawyerId, bookingId) => {
 }
 
 const updateLawyerProfile = async (userId, lawyerId, updateData) => {
-  const { fullname, phone, avatar, specialty, firmName, bankInfo, lawyerCardImage } = updateData;
+  const { fullname, phone, avatar, specialty, firmName, bankInfo, lawyerCardImage, yearsOfExperience, titleDegree, operatingProvinces } = updateData;
 
   // 1. Cập nhật bảng User
   if (fullname || phone) {
@@ -238,8 +249,12 @@ const updateLawyerProfile = async (userId, lawyerId, updateData) => {
   if (firmName) lawyerUpdate.firmName = firmName;
   if (bankInfo) lawyerUpdate.bankInfo = bankInfo;
   if (lawyerCardImage) lawyerUpdate.lawyerCardImage = lawyerCardImage;
+  if (yearsOfExperience !== undefined) lawyerUpdate.yearsOfExperience = yearsOfExperience;
+  if (titleDegree !== undefined) lawyerUpdate.titleDegree = titleDegree;
+  if (operatingProvinces !== undefined) {
+    lawyerUpdate.operatingProvinces = Array.isArray(operatingProvinces) ? operatingProvinces : [operatingProvinces];
+  }
   if (Object.keys(lawyerUpdate).length > 0) {
-    lawyerUpdate.isApproved = false;
     await lawyerModel.findByIdAndUpdate(lawyerId, lawyerUpdate);
   }
 

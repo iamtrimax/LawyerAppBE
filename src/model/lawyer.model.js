@@ -48,6 +48,18 @@ const lawyerSchema = new mongoose.Schema({
     type: Number,
     default: 0, // % nền tảng giữ lại
   },
+  yearsOfExperience: {
+    type: Number,
+    default: 0,
+  },
+  titleDegree: {
+    type: String, // Chức danh/Chức vụ/Học hàm/Học vị
+    default: "",
+  },
+  operatingProvinces: {
+    type: [String], // Địa bàn hoạt động (nhiều tỉnh thành)
+    default: [],
+  },
   bankInfo: {
     bankName: String,
     accountNumber: String,

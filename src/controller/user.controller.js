@@ -60,15 +60,19 @@ const updateToken = async (req, res) => {
 };
 const searchLawyerByCategoryController = async (req, res) => {
   try {
-    const { specialization } = req.query;
+    const { specialization, province } = req.query;
     let query = {}
 
     if (specialization && specialization !== 'Tất cả') {
       query.specialty = specialization;
-      query.isApproved = true;
-    } else {
-      query.isApproved = true;
     }
+    
+    if (province && province !== 'Tất cả') {
+      query.operatingProvinces = province;
+    }
+
+    query.isApproved = true;
+    
     const lawyers = await searchLawyerByCategory(query);
     res.status(200).json({
       success: true,

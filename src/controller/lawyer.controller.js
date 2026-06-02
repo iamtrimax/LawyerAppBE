@@ -1,5 +1,6 @@
 const { lawyerRegister, getUserDetail, updateSchedule, getMySchedule, getLawyerBookings, getLawyerBookingDetail, confirmBookingPayment, updateLawyerProfile, getLawyers } = require("../services/lawyer.services");
 const client = require("../config/redis");
+const generateToken = require("../utils/generateToken");
 
 const getLawyersController = async (req, res) => {
   try {
@@ -24,19 +25,23 @@ const lawyerRegisterController = async (req, res) => {
     email,
     phone,
     password,
+    role,
     lawyerId,
     specialty,
     firmName,
     lawyerCardImage,
     avatar,
-    bankInfo
+    bankInfo,
+    yearsOfExperience,
+    titleDegree,
+    operatingProvinces
   } = req.body;
 
   const requiredFields = {
     fullname: "Họ và tên",
     email: "Email",
     phone: "Số điện thoại",
-    password: "Mật khẩu",
+    ...(role !== "member" && { password: "Mật khẩu" }),
     lawyerId: "Số thẻ hành nghề",
     specialty: "Chuyên môn",
     firmName: "Văn phòng luật",
@@ -73,13 +78,23 @@ const lawyerRegisterController = async (req, res) => {
       firmName,
       lawyerCardImage,
       avatar,
-      bankInfo
+      bankInfo,
+      yearsOfExperience,
+      titleDegree,
+      operatingProvinces
     });
+
+    // Tạo token mới với role đã được cập nhật (quan trọng khi member upgrade lên lawyer)
+    const newAccessToken = generateToken(newLawyer, "7d");
+    const newRefreshToken = generateToken(newLawyer, "14d");
 
     res.status(201).json({
       message: "Đăng ký thành công. Vui lòng đợi admin xét duyệt tài khoản",
       userId: newLawyer._id,
       success: true,
+      user: newLawyer,
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken
     });
   } catch (error) {
     console.error("Lỗi tại lawyerRegisterController:", error);
