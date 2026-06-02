@@ -82,6 +82,11 @@ const lawyerRegister = async (userData) => {
       lawyerProfile.operatingProvinces = Array.isArray(operatingProvinces) ? operatingProvinces : [operatingProvinces];
     }
     if (bankInfo) lawyerProfile.bankInfo = bankInfo;
+    if (user.isVerified && user.role === 'member') {
+      lawyerProfile.isApproved = false;
+      lawyerProfile.isCollaborator = true;
+      lawyerProfile.commissionRate = 20;
+    }
     await lawyerProfile.save();
     await client.del(`lawyer_detail:${user._id}`);
   } else {
@@ -93,6 +98,7 @@ const lawyerRegister = async (userData) => {
       firmName,
       lawyerCardImage,
       avatar,
+      isApproved: false,
       isCollaborator: user.isVerified && user.role === 'member', // Set collaborated if upgrading from member
       commissionRate: (user.isVerified && user.role === 'member') ? 20 : 0, // Default 20% commission for platform
       bankInfo,
@@ -100,13 +106,12 @@ const lawyerRegister = async (userData) => {
       titleDegree: titleDegree || "",
       operatingProvinces: Array.isArray(operatingProvinces) ? operatingProvinces : (operatingProvinces ? [operatingProvinces] : [])
     });
+  }
 
-    // Nếu đang upgrade từ member, cập nhật role User sang lawyer ngay
-    if (user.isVerified && user.role === 'member') {
-      user.role = 'lawyer';
-      user.isApproved = false;
-      await user.save();
-    }
+  // Nếu đang upgrade từ member, cập nhật role User sang lawyer ngay (cho cả 2 trường hợp)
+  if (user.isVerified && user.role === 'member') {
+    user.role = 'lawyer';
+    await user.save();
   }
 
   // 3. Gửi Email
