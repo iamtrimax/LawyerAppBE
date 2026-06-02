@@ -23,12 +23,16 @@ const userRegisterController = async (req, res) => {
 };
 const verifyEmailController = async (req, res) => {
   const { email, otp, role } = req.body;
-  const user = await verifyEmail(email, otp, role);
-  res.status(200).json({
-    message: "Xác minh email thành công",
-    userId: user._id,
-    success: true,
-  });
+  try {
+    const user = await verifyEmail(email, otp, role);
+    res.status(200).json({
+      message: "Xác minh email thành công",
+      userId: user._id,
+      success: true,
+    });
+  } catch (error) {
+    return res.status(400).json({ message: error.message });  
+  }
 };
 const loginController = async (req, res) => {
   const { email, phone, password, role } = req.body;
