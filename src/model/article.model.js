@@ -47,18 +47,7 @@ const articleSchema = new mongoose.Schema({
         type: String,
         required: true,
         enum: [
-            'Hiến pháp', 'Bộ luật', 'Luật', 'Pháp lệnh', 'Lệnh',
-            'Nghị quyết', 'Nghị quyết liên tịch', 'Nghị định',
-            'Quyết định', 'Thông tư', 'Thông tư liên tịch', 'Khác',
-            // Danh mục chung cho bài viết
-            'Dân sự', 'Hình sự', 'Đất đai', 'Hôn nhân', 'Lao động', 'Kinh doanh',
-            // Danh mục tùy chỉnh cho văn bản đất đai
-            'Chính sách & Quy định chung',
-            'Bồi thường & Giải phóng mặt bằng',
-            'Giá đất & Nghĩa vụ tài chính',
-            'Thủ tục hành chính & Cấp sổ đỏ',
-            'Quy hoạch & Kế hoạch sử dụng đất',
-            'Xử phạt & Thanh tra'
+            'Dân sự', 'Hình sự', 'Hôn nhân gia đình', 'Đất đai', 'Kinh doanh thương mại', 'Hành chính', 'Lao động', 'Sở hữu trí tuệ', 'Thuế', 'Khác'
         ]
     },
     tags: [{

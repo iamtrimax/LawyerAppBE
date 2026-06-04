@@ -13,7 +13,9 @@ const legalFormSchema = new mongoose.Schema({
     category: {
         type: String,
         required: true,
-        enum: ['Civil', 'Criminal', 'Business', 'Labor', 'Family', 'Other']
+        enum: [
+            'Dân sự', 'Hình sự','Hôn nhân gia đình', 'Đất đai', 'Kinh doanh thương mại', 'Hành chính', 'Lao động', 'Sở hữu trí tuệ', 'Thuế', 'Khác'
+        ]
     },
     lawyerID: {
         type: mongoose.Schema.Types.ObjectId,
