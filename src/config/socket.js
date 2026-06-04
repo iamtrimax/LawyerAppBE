@@ -38,6 +38,7 @@ const initSocket = (server) => {
 
             // 2. Cập nhật thiết bị mới nhất vào map
             userSockets.set(userId.toString(), socket.id);
+            socket.join(userId.toString());
             console.log(`User/Guest ${userId} registered with socket ${socket.id}`);
 
             // Chỉ kiểm tra cuộc gọi cho người dùng thật (không phải Guest)

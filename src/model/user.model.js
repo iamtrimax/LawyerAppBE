@@ -45,6 +45,10 @@ const userSchema = new mongoose.Schema({
         enum: ['Bạc', 'Vàng', 'Bạch kim', 'Kim cương'],
         default: 'Bạc'
     },
+    legalInterest: {
+        type: String,
+        default: ""
+    },
     referredBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

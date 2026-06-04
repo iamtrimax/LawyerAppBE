@@ -6,7 +6,7 @@ const verifyAdmin = require("../../middleware/verifyAdmin");
 const { aprroveLawyerController, getLawyerDetailForAdminController } = require("../controller/admin.controller");
 const verifyLawyer = require("../../middleware/verifyLawyer");
 const rateLimiter = require("../../middleware/rateLimiter");
-const { handleSePayWebhookController, createPaymentLinkController } = require("../controller/payment.controller");
+const { handleSePayWebhookController, createPaymentLinkController, createMemberUpgradePaymentController, getMemberUpgradePaymentStatusController } = require("../controller/payment.controller");
 const {
     createArticleController,
     getArticlesController,
@@ -155,6 +155,8 @@ router.delete("/admin/graph/clear", verifyAccessToken, verifyAdmin, clearAllGrap
 // payment routes
 router.post("/payment/sepay-webhook", handleSePayWebhookController);
 router.post("/payment/create-url", verifyAccessToken, paymentLimiter, createPaymentLinkController);
+router.post("/payment/member-upgrade", verifyAccessToken, paymentLimiter, createMemberUpgradePaymentController);
+router.get("/payment/member-upgrade/:upgradeId", verifyAccessToken, getMemberUpgradePaymentStatusController);
 
 // Chat Consultation routes
 router.post("/chat/start", verifyAccessToken, startChatController);

@@ -1,4 +1,4 @@
-const { verifySePayWebhook, createSePayPaymentUrl, processPaymentWebhook } = require("../services/payment.services");
+const { verifySePayWebhook, createSePayPaymentUrl, createMemberUpgradePayment, getMemberUpgradePaymentStatus, processPaymentWebhook } = require("../services/payment.services");
 
 const handleSePayWebhookController = async (req, res) => {
     try {
@@ -56,7 +56,53 @@ const createPaymentLinkController = async (req, res) => {
     }
 }
 
+const createMemberUpgradePaymentController = async (req, res) => {
+    try {
+        const result = await createMemberUpgradePayment(req.userId);
+
+        return res.status(200).json({
+            success: true,
+            message: "Quet ma QR de thanh toan phi nang cap member. Tai khoan chi duoc nang cap sau khi thanh toan thanh cong.",
+            data: {
+                upgradeId: result.upgrade._id,
+                status: result.upgrade.status,
+                amount: result.amount,
+                description: result.description,
+                qrUrl: result.qrUrl
+            }
+        });
+    } catch (error) {
+        console.error("Create Member Upgrade Payment Error:", error.message);
+        return res.status(400).json({
+            success: false,
+            message: error.message || "Failed to create member upgrade payment"
+        });
+    }
+}
+
+const getMemberUpgradePaymentStatusController = async (req, res) => {
+    try {
+        const result = await getMemberUpgradePaymentStatus(req.userId, req.params.upgradeId);
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                upgrade: result.upgrade,
+                currentRole: result.currentRole
+            }
+        });
+    } catch (error) {
+        console.error("Get Member Upgrade Payment Status Error:", error.message);
+        return res.status(404).json({
+            success: false,
+            message: error.message || "Failed to get member upgrade payment status"
+        });
+    }
+}
+
 module.exports = {
     handleSePayWebhookController,
-    createPaymentLinkController
+    createPaymentLinkController,
+    createMemberUpgradePaymentController,
+    getMemberUpgradePaymentStatusController
 };

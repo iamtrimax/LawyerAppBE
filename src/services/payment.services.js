@@ -50,13 +50,147 @@ const { getIO } = require("../config/socket");
 
 const client = require("../config/redis");
 const lawyerModel = require("../model/lawyer.model");
+const memberUpgradeModel = require("../model/memberUpgrade.model");
+const userModel = require("../model/user.model");
+
+const getMemberUpgradePrice = () => {
+    const price = Number(process.env.MEMBER_UPGRADE_PRICE || 99000);
+    if (!Number.isFinite(price) || price <= 0) {
+        throw new Error("MEMBER_UPGRADE_PRICE khong hop le");
+    }
+    return price;
+};
+
+const createMemberUpgradePayment = async (userId) => {
+    const user = await userModel.findById(userId);
+    if (!user) {
+        throw new Error("Nguoi dung khong ton tai");
+    }
+
+    if (user.role === "member") {
+        throw new Error("Tai khoan da la member");
+    }
+
+    if (user.role !== "customer") {
+        throw new Error("Chi customer moi co the nang cap len member");
+    }
+
+    const amount = getMemberUpgradePrice();
+    let upgrade = await memberUpgradeModel.findOne({
+        userID: userId,
+        status: 'Pending',
+        amount
+    }).sort({ createdAt: -1 });
+
+    if (!upgrade) {
+        upgrade = await memberUpgradeModel.create({
+            userID: userId,
+            amount,
+            paymentCode: `UPGRADE-${userId}-${Date.now()}`
+        });
+    }
+
+    const description = `UPGRADE MEMBER ${upgrade._id}`;
+    const qrUrl = createSePayPaymentUrl(upgrade.amount, description);
+
+    return {
+        upgrade,
+        qrUrl,
+        amount: upgrade.amount,
+        description
+    };
+};
+
+const getMemberUpgradePaymentStatus = async (userId, upgradeId) => {
+    const upgrade = await memberUpgradeModel.findOne({
+        _id: upgradeId,
+        userID: userId
+    }).select('-paymentInfo.fullWebhookData');
+
+    if (!upgrade) {
+        throw new Error("Khong tim thay giao dich nang cap member");
+    }
+
+    const user = await userModel.findById(userId).select('role');
+
+    return {
+        upgrade,
+        currentRole: user?.role
+    };
+};
+
+const processMemberUpgradePayment = async (webhookData, transactionContent) => {
+    const match = transactionContent.match(/UPGRADE(?:\s+MEMBER)?\s+([0-9a-fA-F]{24})/i);
+    if (!match) {
+        return null;
+    }
+
+    const upgrade = await memberUpgradeModel.findById(match[1]);
+    if (!upgrade) {
+        return null;
+    }
+
+    if (upgrade.status === 'Paid') {
+        return upgrade;
+    }
+
+    const paidAmount = Number(webhookData.transferAmount || webhookData.amount || 0);
+    if (paidAmount < upgrade.amount) {
+        throw new Error("So tien thanh toan nang cap member chua du");
+    }
+
+    const user = await userModel.findById(upgrade.userID);
+    if (!user) {
+        throw new Error("Nguoi dung nang cap member khong ton tai");
+    }
+
+    if (user.role !== 'customer' && user.role !== 'member') {
+        throw new Error("Role hien tai khong duoc phep nang cap member");
+    }
+
+    user.role = 'member';
+    await user.save();
+
+    upgrade.status = 'Paid';
+    upgrade.paidAt = new Date();
+    upgrade.paymentInfo = {
+        transactionID: webhookData.id,
+        gateway: webhookData.gateway,
+        content: webhookData.content,
+        description: webhookData.description,
+        senderAccount: webhookData.sender_account || webhookData.source_account || "",
+        senderName: webhookData.sender_name || "",
+        fullWebhookData: webhookData
+    };
+    await upgrade.save();
+
+    try {
+        const io = getIO();
+        io.to(upgrade.userID.toString()).emit("member_upgrade_success", {
+            message: "Nang cap member thanh cong!",
+            userId: upgrade.userID.toString(),
+            upgradeId: upgrade._id.toString()
+        });
+    } catch (socketError) {
+        console.error("Loi khi gui socket event nang cap member:", socketError.message);
+    }
+
+    return upgrade;
+};
 
 const processPaymentWebhook = async (webhookData) => {
     try {
         console.log("Webhook data:", webhookData);
 
         // Giả sử nội dung chuyển khoản (content hoặc description) chứa Booking ID
-        const transactionContent = webhookData.content || webhookData.description;
+        const transactionContent = webhookData.content || webhookData.description || "";
+
+        const memberUpgrade = await processMemberUpgradePayment(webhookData, transactionContent);
+        if (memberUpgrade) {
+            console.log(`Member upgrade ${memberUpgrade._id} paid and user role updated.`);
+            return memberUpgrade;
+        }
+
         const bookingIdRegex = /[0-9a-fA-F]{24}/;
         const match = transactionContent.match(bookingIdRegex);
 
@@ -127,6 +261,8 @@ const processPaymentWebhook = async (webhookData) => {
 
 module.exports = {
     createSePayPaymentUrl,
+    createMemberUpgradePayment,
+    getMemberUpgradePaymentStatus,
     verifySePayWebhook,
     processPaymentWebhook
 };

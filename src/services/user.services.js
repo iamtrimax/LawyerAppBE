@@ -7,7 +7,7 @@ const sendEmail = require("../utils/sendEmail");
 const bcrypt = require("bcryptjs");
 const client = require("../config/redis");
 const userRegister = async (userData) => {
-  const { email, fullname, password, phone, role, referralCode } = userData;
+  const { email, fullname, password, phone, role, referralCode, legalInterest } = userData;
   const userExists = await userModel.findOne({ email });
 
   const salt = await bcrypt.genSalt(10);
@@ -23,6 +23,7 @@ const userRegister = async (userData) => {
     userExists.password = hashedPassword;
     userExists.phone = phone;
     userExists.otp = otp;
+    userExists.legalInterest = legalInterest || "";
     if (role) userExists.role = role;
     if (referralCode && !userExists.referredBy) {
       const referrer = await userModel.findOne({ phone: referralCode });
@@ -50,6 +51,7 @@ const userRegister = async (userData) => {
     phone,
     otp,
     role: role || 'customer',
+    legalInterest: legalInterest || "",
     referredBy
   });
 
