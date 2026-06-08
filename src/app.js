@@ -23,7 +23,8 @@ process.on('SIGINT', async () => {
 
 
 app.use(cors());
-app.use(express.json()); // Cho phép nhận JSON body
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Khởi chạy các tiến trình chạy ngầm
 initReminderCron();
