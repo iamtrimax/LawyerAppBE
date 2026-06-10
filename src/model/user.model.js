@@ -54,6 +54,10 @@ const userSchema = new mongoose.Schema({
         ref: 'User',
         default: null
     },
+    isActived: {
+        type: Boolean,
+        default: true
+    },
     passwordChangedAt: { type: Date }
 });
 

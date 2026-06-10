@@ -12,6 +12,7 @@ const createArticle = async ({ lawyerId, title, content, category, images, tags,
         attachments: attachments || [],
         tags: tags || [],
         status: status || 'Published',
+        isPublished: false,
         thumbnail: thumbnail || (images && images.length > 0 ? images[0] : '')
     });
 
@@ -26,7 +27,7 @@ const createArticle = async ({ lawyerId, title, content, category, images, tags,
 
 const getArticles = async ({ category, tag, page = 1, limit = 10, search }) => {
     const skip = (page - 1) * limit;
-    const query = { status: 'Published' };
+    const query = { status: 'Published', isPublished: true };
 
     if (category) query.category = category;
     if (tag) query.tags = tag;

@@ -115,6 +115,12 @@ const userLogin = async (userData) => {
   });
   if (!user) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
 
+  if (user.isActived === false) {
+    const error = new Error("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.");
+    error.statusCode = 403;
+    throw error;
+  }
+
   // 2. Kiểm tra mật khẩu
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng");

@@ -58,6 +58,10 @@ const articleSchema = new mongoose.Schema({
         enum: ['Draft', 'Published'],
         default: 'Published'
     },
+    isPublished: {
+        type: Boolean,
+        default: false
+    },
     attachments: [{
         name: { type: String },
         url: { type: String }
