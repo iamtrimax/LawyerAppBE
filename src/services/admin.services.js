@@ -211,7 +211,7 @@ const getAllArticlesForAdmin = async ({ page = 1, limit = 10, filter }) => {
   const skip = (page - 1) * limit;
   const query = {};
 
-  if (filter === 'published') query.isPublished = true;
+  if (filter === 'published') query.isPublished = { $ne: false };
   if (filter === 'pending') query.isPublished = false;
 
   const [articles, total] = await Promise.all([

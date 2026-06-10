@@ -27,7 +27,7 @@ const createArticle = async ({ lawyerId, title, content, category, images, tags,
 
 const getArticles = async ({ category, tag, page = 1, limit = 10, search }) => {
     const skip = (page - 1) * limit;
-    const query = { status: 'Published', isPublished: true };
+    const query = { status: 'Published', isPublished: { $ne: false } };
 
     if (category) query.category = category;
     if (tag) query.tags = tag;
