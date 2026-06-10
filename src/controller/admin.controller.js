@@ -1,5 +1,5 @@
 const { default: Expo } = require("expo-server-sdk");
-const { approveLawyer, getLawyerDetailForAdmin, getAllLawyersService, deleteUserAccount, lockUserAccount, unlockUserAccount, approveArticle, getAllArticlesForAdmin, getAllUsersService } = require("../services/admin.services");
+const { approveLawyer, getLawyerDetailForAdmin, getAllLawyersService, deleteUserAccount, lockUserAccount, unlockUserAccount, approveArticle, getAllArticlesForAdmin, getAllUsersService, deleteArticleForAdmin, getArticleDetailForAdmin } = require("../services/admin.services");
 
 let expo = new Expo();
 
@@ -213,5 +213,37 @@ const getAllUsersController = async (req, res) => {
   }
 };
 
-module.exports = { aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers: getAllLawyersController, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController };
+const deleteArticleAdminController = async (req, res) => {
+  try {
+    const result = await deleteArticleForAdmin(req.params.articleId);
+    res.status(200).json({
+      success: true,
+      message: result.message
+    });
+  } catch (error) {
+    console.error("Lỗi tại deleteArticleController:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+const getArticleDetailAdminController = async (req, res) => {
+  try {
+    const article = await getArticleDetailForAdmin(req.params.articleId);
+    res.status(200).json({
+      success: true,
+      data: article
+    });
+  } catch (error) {
+    console.error("Lỗi tại getArticleDetailAdminController:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+module.exports = { aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers: getAllLawyersController, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController, deleteArticleAdminController, getArticleDetailAdminController };
 

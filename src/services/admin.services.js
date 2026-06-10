@@ -263,4 +263,40 @@ const getAllUsersService = async ({ page = 1, limit = 10, roleFilter, search }) 
   return { users, total, page: parseInt(page, 10), totalPages: Math.ceil(total / limit) };
 };
 
-module.exports = { approveLawyer, getLawyerDetailForAdmin, getAllLawyersService, deleteUserAccount, lockUserAccount, unlockUserAccount, approveArticle, getAllArticlesForAdmin, getAllUsersService };
+const deleteArticleForAdmin = async (articleId) => {
+  const article = await articleModel.findByIdAndDelete(articleId);
+  if (!article) {
+    const error = new Error("Không tìm thấy bài viết để xoá");
+    error.statusCode = 404;
+    throw error;
+  }
+  
+  // Xóa cache danh sách bài viết
+  const keys = await client.keys('articles_list_*');
+  if (keys.length > 0) {
+      await Promise.all(keys.map(key => client.del(key)));
+  }
+  return { message: "Xóa bài viết thành công" };
+};
+
+const getArticleDetailForAdmin = async (articleId) => {
+  const article = await articleModel.findById(articleId)
+    .populate({
+      path: 'author',
+      populate: {
+        path: 'userID',
+        select: 'fullname avatar email phone'
+      }
+    })
+    .lean();
+
+  if (!article) {
+    const error = new Error("Không tìm thấy bài viết");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return article;
+};
+
+module.exports = { approveLawyer, getLawyerDetailForAdmin, getAllLawyersService, deleteUserAccount, lockUserAccount, unlockUserAccount, approveArticle, getAllArticlesForAdmin, getAllUsersService, deleteArticleForAdmin, getArticleDetailForAdmin };

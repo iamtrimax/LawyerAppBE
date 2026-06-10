@@ -3,7 +3,7 @@ const { userRegisterController, verifyEmailController, loginController, updateTo
 const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController, getLawyersController } = require("../controller/lawyer.controller");
 const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
-const { aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController } = require("../controller/admin.controller");
+const { aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController, deleteArticleAdminController, getArticleDetailAdminController } = require("../controller/admin.controller");
 const verifyLawyer = require("../../middleware/verifyLawyer");
 const rateLimiter = require("../../middleware/rateLimiter");
 const { handleSePayWebhookController, createPaymentLinkController, createMemberUpgradePaymentController, getMemberUpgradePaymentStatusController } = require("../controller/payment.controller");
@@ -139,7 +139,9 @@ router.delete("/admin/users/:targetId", verifyAccessToken, verifyAdmin, deleteUs
 router.put("/admin/users/:targetId/lock", verifyAccessToken, verifyAdmin, lockUserAccountController);
 router.put("/admin/users/:targetId/unlock", verifyAccessToken, verifyAdmin, unlockUserAccountController);
 router.get("/admin/articles", verifyAccessToken, verifyAdmin, getAllArticlesController);
+router.get("/admin/articles/:articleId", verifyAccessToken, verifyAdmin, getArticleDetailAdminController);
 router.put("/admin/articles/:articleId/approve", verifyAccessToken, verifyAdmin, approveArticleController);
+router.delete("/admin/articles/:articleId", verifyAccessToken, verifyAdmin, deleteArticleAdminController);
 
 // Admin Legal Resource Management
 router.post("/admin/legal-resources", verifyAccessToken, verifyAdmin, createResourceController);
