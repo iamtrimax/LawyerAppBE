@@ -3,7 +3,8 @@ const lawyerModel = require('../model/lawyer.model');
 const client = require('../config/redis');
 
 const createArticle = async ({ lawyerId, title, content, category, images, tags, status, thumbnail, attachments }) => {
-    const newArticle = await articleModel.create({
+    try {
+     const newArticle = await articleModel.create({
         title,
         content,
         author: lawyerId,
@@ -22,7 +23,11 @@ const createArticle = async ({ lawyerId, title, content, category, images, tags,
         await client.del(keys);
     }
 
-    return newArticle;
+    return newArticle;   
+    } catch (error) {
+        console.log("lỗi server: ", error);
+        throw new Error(error);
+    }
 };
 
 const getArticles = async ({ category, tag, page = 1, limit = 10, search }) => {
