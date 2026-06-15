@@ -1,5 +1,5 @@
 const Article = require('../model/article.model');
-const { extractGraphFromArticle } = require('../services/graphExtraction.service');
+const { extractGraphFromArticle } = require('../services/ruleBasedExtraction.service');
 const { graphSearch } = require('../services/graphSearch.service');
 const { getDriver } = require('../config/neo4j');
 
@@ -43,8 +43,8 @@ const buildGraphForAllArticles = async (req, res) => {
             // Giải phóng tham chiếu bộ nhớ thủ công để giúp V8 Garbage Collector
             article = null;
 
-            // Tránh rate limit của Gemini API
-            await new Promise(r => setTimeout(r, 1000));
+            // Delay nhỏ vì chỉ còn embedding calls (rule-based parse tức thì)
+            await new Promise(r => setTimeout(r, 100));
         }
 
         console.log(`🏁 [GraphController] Tiến trình hoàn tất. Thành công: ${successCount}, Thất bại: ${failCount}`);
