@@ -1,5 +1,5 @@
 const { default: Expo } = require("expo-server-sdk");
-const { approveLawyer, getLawyerDetailForAdmin, getAllLawyersService, deleteUserAccount, lockUserAccount, unlockUserAccount, approveArticle, getAllArticlesForAdmin, getAllUsersService, deleteArticleForAdmin, getArticleDetailForAdmin } = require("../services/admin.services");
+const { addLawyerForAdmin, approveLawyer, getLawyerDetailForAdmin, getAllLawyersService, deleteUserAccount, lockUserAccount, unlockUserAccount, approveArticle, getAllArticlesForAdmin, getAllUsersService, deleteArticleForAdmin, getArticleDetailForAdmin, getAllBookingsForAdmin, getBookingDetailForAdmin, getAllRefundsForAdmin, processRefundForAdmin, getDashboardStatsForAdmin } = require("../services/admin.services");
 
 let expo = new Expo();
 
@@ -245,5 +245,128 @@ const getArticleDetailAdminController = async (req, res) => {
   }
 };
 
-module.exports = { aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers: getAllLawyersController, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController, deleteArticleAdminController, getArticleDetailAdminController };
+const getAllBookingsAdminController = async (req, res) => {
+  const { page = 1, limit = 10, status, paymentStatus, payoutStatus, search, dateFrom, dateTo } = req.query;
+  try {
+    const data = await getAllBookingsForAdmin({
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+      status,
+      paymentStatus,
+      payoutStatus,
+      search,
+      dateFrom,
+      dateTo
+    });
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error("Lỗi tại getAllBookingsAdminController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+const getBookingDetailAdminController = async (req, res) => {
+  try {
+    const booking = await getBookingDetailForAdmin(req.params.bookingId);
+    res.status(200).json({
+      success: true,
+      data: booking
+    });
+  } catch (error) {
+    console.error("Lỗi tại getBookingDetailAdminController:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+const getAllRefundsAdminController = async (req, res) => {
+  const { page = 1, limit = 10, status, search } = req.query;
+  try {
+    const data = await getAllRefundsForAdmin({
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+      status,
+      search
+    });
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error("Lỗi tại getAllRefundsAdminController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+const processRefundAdminController = async (req, res) => {
+  const { refundId } = req.params;
+  const { status, adminNote } = req.body;
+  const adminId = req.userId;
+
+  try {
+    const refund = await processRefundForAdmin({
+      refundId,
+      adminId,
+      status,
+      adminNote
+    });
+    res.status(200).json({
+      success: true,
+      message: status === 'Processed' ? "Phê duyệt và thực hiện hoàn tiền thành công" : "Từ chối yêu cầu hoàn tiền thành công",
+      data: refund
+    });
+  } catch (error) {
+    console.error("Lỗi tại processRefundAdminController:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+const getDashboardStatsAdminController = async (req, res) => {
+  try {
+    const data = await getDashboardStatsForAdmin();
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error("Lỗi tại getDashboardStatsAdminController:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+const addLawyerAdminController = async (req, res) => {
+  try {
+    const user = await addLawyerForAdmin(req.body);
+    res.status(201).json({
+      success: true,
+      message: "Thêm luật sư thành công",
+      data: user
+    });
+  } catch (error) {
+    console.error("Lỗi tại addLawyerAdminController:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ",
+    });
+  }
+};
+
+module.exports = { addLawyerAdminController, aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers: getAllLawyersController, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController, deleteArticleAdminController, getArticleDetailAdminController, getAllBookingsAdminController, getBookingDetailAdminController, getAllRefundsAdminController, processRefundAdminController, getDashboardStatsAdminController };
 

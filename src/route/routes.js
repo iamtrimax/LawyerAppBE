@@ -3,7 +3,7 @@ const { userRegisterController, verifyEmailController, loginController, updateTo
 const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController, getLawyersController } = require("../controller/lawyer.controller");
 const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
-const { aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController, deleteArticleAdminController, getArticleDetailAdminController } = require("../controller/admin.controller");
+const { aprroveLawyerController, getLawyerDetailForAdminController, getAllLawyers, deleteUserAccountController, lockUserAccountController, unlockUserAccountController, approveArticleController, getAllArticlesController, getAllUsersController, deleteArticleAdminController, getArticleDetailAdminController, getAllBookingsAdminController, getBookingDetailAdminController, getAllRefundsAdminController, processRefundAdminController, getDashboardStatsAdminController, addLawyerAdminController } = require("../controller/admin.controller");
 const verifyLawyer = require("../../middleware/verifyLawyer");
 const rateLimiter = require("../../middleware/rateLimiter");
 const { handleSePayWebhookController, createPaymentLinkController, createMemberUpgradePaymentController, getMemberUpgradePaymentStatusController } = require("../controller/payment.controller");
@@ -132,6 +132,7 @@ router.put("/lawyer/forms/update/:id", verifyAccessToken, verifyLawyer, updateMy
 router.delete("/lawyer/forms/delete/:id", verifyAccessToken, verifyLawyer, deleteMyFormController);
 
 // admin routes
+router.post("/admin/lawyers", verifyAccessToken, verifyAdmin, authLimiter, addLawyerAdminController);
 router.post("/approve-lawyer", verifyAccessToken, verifyAdmin, authLimiter, aprroveLawyerController);
 router.get("/admin/lawyer-detail/:lawyerId", verifyAccessToken, verifyAdmin, getLawyerDetailForAdminController);
 router.get("/admin/users", verifyAccessToken, verifyAdmin, getAllUsersController);
@@ -142,6 +143,17 @@ router.get("/admin/articles", verifyAccessToken, verifyAdmin, getAllArticlesCont
 router.get("/admin/articles/:articleId", verifyAccessToken, verifyAdmin, getArticleDetailAdminController);
 router.put("/admin/articles/:articleId/approve", verifyAccessToken, verifyAdmin, approveArticleController);
 router.delete("/admin/articles/:articleId", verifyAccessToken, verifyAdmin, deleteArticleAdminController);
+
+// Admin Booking Management
+router.get("/admin/bookings", verifyAccessToken, verifyAdmin, getAllBookingsAdminController);
+router.get("/admin/bookings/:bookingId", verifyAccessToken, verifyAdmin, getBookingDetailAdminController);
+
+// Admin Dashboard Stats
+router.get("/admin/dashboard-stats", verifyAccessToken, verifyAdmin, getDashboardStatsAdminController);
+
+// Admin Refund Management
+router.get("/admin/refunds", verifyAccessToken, verifyAdmin, getAllRefundsAdminController);
+router.put("/admin/refunds/:refundId", verifyAccessToken, verifyAdmin, processRefundAdminController);
 
 // Admin Legal Resource Management
 router.post("/admin/legal-resources", verifyAccessToken, verifyAdmin, createResourceController);

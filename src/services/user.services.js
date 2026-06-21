@@ -240,7 +240,10 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
     });
 
     // Xóa cache danh sách cuộc hẹn của user
-    await client.del(`user_bookings:${userId}`);
+    await Promise.all([
+      client.del(`user_bookings:${userId}`),
+      client.del("admin_dashboard_stats")
+    ]);
 
     // Gửi email thông báo (Placeholder)
     // await sendEmail(userEmail, "Đặt lịch thành công", "...");
@@ -505,16 +508,14 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
     booking.status = 'Cancelled';
     booking.cancelReason = cancelReason;
 
-    // Chỉ cập nhật paymentStatus nếu đã thanh toán và có hoàn tiền
-    if (booking.paymentStatus === 'Paid' && refundAmount > 0) {
-      booking.paymentStatus = 'Refunded';
-    }
+    // Do NOT change paymentStatus to Refunded immediately.
+    // It remains 'Paid' until the admin processes and confirms the refund.
 
     await booking.save();
 
     // 7. Tạo refund record nếu có hoàn tiền (và đã thanh toán)
     let refundRecord = null;
-    if (booking.paymentStatus === 'Refunded' && refundAmount > 0) {
+    if (booking.paymentStatus === 'Paid' && refundAmount > 0) {
       refundRecord = await refundModel.create({
         bookingID: bookingId,
         userID: userId,
@@ -533,7 +534,8 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
       client.del(`user_bookings:${userId}`),
       client.del(`booking_detail:${bookingId}`),
       client.del(`lawyer_bookings:${booking.lawyerID}`),
-      client.del(`lawyer_booking_detail:${bookingId}`)
+      client.del(`lawyer_booking_detail:${bookingId}`),
+      client.del("admin_dashboard_stats")
     ]);
 
     return {

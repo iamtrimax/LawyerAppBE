@@ -228,7 +228,8 @@ const confirmBookingPayment = async (lawyerId, bookingId) => {
     client.del(`lawyer_bookings:${lawyerId}`),
     client.del(`lawyer_booking_detail:${bookingId}`),
     client.del(`user_bookings:${userId}`),
-    client.del(`booking_detail:${bookingId}`)
+    client.del(`booking_detail:${bookingId}`),
+    client.del("admin_dashboard_stats")
   ]);
 
   return booking;
