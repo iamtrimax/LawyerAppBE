@@ -256,31 +256,43 @@ const unlockUserAccount = async (targetId) => {
 };
 
 const approveArticle = async (articleId) => {
+  // 1. TỐI ƯU PAYLOAD: Chỉ cập nhật và lấy ra các trường cần thiết
+  // Dùng .select() để loại bỏ các trường nội dung nặng, giảm từ 115kB xuống vài byte
   const article = await articleModel.findByIdAndUpdate(
     articleId,
     { isPublished: true, status: 'Published' },
     { new: true }
-  );
+  ).select('_id isPublished status'); 
+
   if (!article) {
     const error = new Error("Không tìm thấy bài viết");
     error.statusCode = 404;
     throw error;
   }
   
-//  TỐI ƯU: Thay thế client.keys bằng SCAN để không block Redis
-  let cursor = '0';
-  const keysToDelete = [];
-  do {
-    // Mỗi lần quét lấy ra khoảng 100 keys để kiểm tra
-    const reply = await client.scan(cursor, { MATCH: 'articles_list_*', COUNT: 100 });
-    cursor = reply.cursor;
-    keysToDelete.push(...reply.keys);
-  } while (cursor !== '0');
+  // 2. TỐI ƯU CƠ CHẾ: Đẩy việc xóa cache vào hậu trường (Background Task)
+  // Tuyệt đối KHÔNG DÙNG 'await' ở đây để API được giải phóng và trả về lập tức
+  setImmediate(async () => {
+    try {
+      let cursor = '0';
+      const keysToDelete = [];
+      do {
+        // Tăng COUNT từ 100 lên 1000 để giảm số lần phải gọi lên Redis
+        const reply = await client.scan(cursor, { MATCH: 'articles_list_*', COUNT: 1000 });
+        cursor = reply.cursor;
+        keysToDelete.push(...reply.keys);
+      } while (cursor !== '0');
 
-  // Xóa các key tìm được (Dùng UNLINK thay vì DEL nếu dùng Redis 4.0+ để xóa bất đồng bộ)
-  if (keysToDelete.length > 0) {
-      await Promise.all(keysToDelete.map(key => client.unlink(key)));
-  }
+      if (keysToDelete.length > 0) {
+          // Dùng unlink thay vì del để Redis xóa ngầm, không block hệ thống
+          await Promise.all(keysToDelete.map(key => client.unlink(key)));
+      }
+    } catch (cacheError) {
+      console.error("Lỗi xóa cache ngầm:", cacheError);
+    }
+  });
+
+  // Trình duyệt sẽ nhận được phản hồi ngay tại đây mà không cần đợi Redis quét xong
   return article;
 };
 
