@@ -267,10 +267,19 @@ const approveArticle = async (articleId) => {
     throw error;
   }
   
-  // Xóa cache danh sách bài viết
-  const keys = await client.keys('articles_list_*');
-  if (keys.length > 0) {
-      await Promise.all(keys.map(key => client.del(key)));
+//  TỐI ƯU: Thay thế client.keys bằng SCAN để không block Redis
+  let cursor = '0';
+  const keysToDelete = [];
+  do {
+    // Mỗi lần quét lấy ra khoảng 100 keys để kiểm tra
+    const reply = await client.scan(cursor, { MATCH: 'articles_list_*', COUNT: 100 });
+    cursor = reply.cursor;
+    keysToDelete.push(...reply.keys);
+  } while (cursor !== '0');
+
+  // Xóa các key tìm được (Dùng UNLINK thay vì DEL nếu dùng Redis 4.0+ để xóa bất đồng bộ)
+  if (keysToDelete.length > 0) {
+      await Promise.all(keysToDelete.map(key => client.unlink(key)));
   }
   return article;
 };
