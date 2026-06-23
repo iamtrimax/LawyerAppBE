@@ -304,7 +304,7 @@ const getAllArticlesForAdmin = async ({ page = 1, limit = 10, filter }) => {
   if (filter === 'pending') query.isPublished = false;
 
   const [articles, total] = await Promise.all([
-      articleModel.find(query)
+      articleModel.find(query).select("-content")
           .populate({
               path: 'author',
               populate: {
