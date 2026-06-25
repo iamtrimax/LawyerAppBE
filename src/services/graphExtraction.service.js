@@ -40,7 +40,7 @@ const extractGraphFromBatch = async (articles) => {
             
             // Khởi tạo model LangChain với Structured Output
             const llm = new ChatGoogleGenerativeAI({
-                modelName: "gemini-2.5-flash",
+                model: "gemini-2.5-flash",
                 apiKey: activeKey,
                 maxOutputTokens: 8192,
                 temperature: 0, // Temperature 0 để lấy output chính xác định dạng
