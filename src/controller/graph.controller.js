@@ -1,5 +1,5 @@
 const Article = require('../model/article.model');
-const { extractGraphFromArticle } = require('../services/ruleBasedExtraction.service');
+const { extractGraphFromBatch } = require('../services/graphExtraction.service');
 const { graphSearch } = require('../services/graphSearch.service');
 const { getDriver } = require('../config/neo4j');
 
@@ -16,7 +16,7 @@ const buildGraphForAllArticles = async (req, res) => {
         const totalArticles = await Article.countDocuments({ status: 'Published' });
         console.log(`📊 [GraphController] Tìm thấy tổng cộng ${totalArticles} bài viết cần xử lý.`);
 
-        // Sử dụng cursor để stream dữ liệu từ MongoDB thay vì load toàn bộ 2700+ docs có trường nội dung rất lớn vào RAM cùng một lúc
+        // Sử dụng cursor để stream dữ liệu từ MongoDB
         const cursor = Article.find({ status: 'Published' })
             .select('title content textContent status')
             .cursor();
@@ -24,27 +24,35 @@ const buildGraphForAllArticles = async (req, res) => {
         let successCount = 0;
         let failCount = 0;
         let processedCount = 0;
+        let batch = [];
+        const BATCH_SIZE = 10; // Cấu hình kích thước an toàn cho JSON output của Gemini
 
         for (let article = await cursor.next(); article != null; article = await cursor.next()) {
+            batch.push(article);
             processedCount++;
-            console.log(`⏳ [GraphController] Processing [${processedCount}/${totalArticles}] - ID: ${article._id}`);
-            try {
-                const result = await extractGraphFromArticle(article);
-                if (result) {
-                    successCount++;
-                } else {
-                    failCount++;
+
+            // Khi gom đủ BATCH_SIZE hoặc là bài cuối cùng
+            if (batch.length >= BATCH_SIZE || processedCount === totalArticles) {
+                console.log(`⏳ [GraphController] Processing Batch [${processedCount - batch.length + 1} - ${processedCount}]/${totalArticles}`);
+                
+                try {
+                    const result = await extractGraphFromBatch(batch);
+                    if (result) {
+                        successCount += batch.length;
+                    } else {
+                        failCount += batch.length;
+                    }
+                } catch (err) {
+                    console.error(`❌ [GraphController] Lỗi xử lý batch:`, err.message);
+                    failCount += batch.length;
                 }
-            } catch (err) {
-                console.error(`❌ [GraphController] Lỗi xử lý bài viết ${article._id}:`, err.message);
-                failCount++;
+
+                // Giải phóng tham chiếu bộ nhớ
+                batch = [];
+
+                // Delay nhỏ giữa các batch để tránh rate limit của Gemini API
+                await new Promise(r => setTimeout(r, 2000));
             }
-
-            // Giải phóng tham chiếu bộ nhớ thủ công để giúp V8 Garbage Collector
-            article = null;
-
-            // Delay nhỏ vì chỉ còn embedding calls (rule-based parse tức thì)
-            await new Promise(r => setTimeout(r, 100));
         }
 
         console.log(`🏁 [GraphController] Tiến trình hoàn tất. Thành công: ${successCount}, Thất bại: ${failCount}`);
@@ -64,7 +72,7 @@ const buildGraphForArticle = async (req, res) => {
             return res.status(404).json({ success: false, message: "Không tìm thấy bài viết" });
         }
 
-        const graphData = await extractGraphFromArticle(article);
+        const graphData = await extractGraphFromBatch([article]);
         if (!graphData) {
             return res.status(500).json({ success: false, message: "Trích xuất đồ thị thất bại" });
         }
