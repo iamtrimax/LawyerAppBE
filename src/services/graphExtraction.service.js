@@ -1,4 +1,5 @@
 const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
+const { HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 const { z } = require('zod');
 const { getDriver } = require('../config/neo4j');
 const { generateEmbedding } = require('./embedding.service');
@@ -44,6 +45,24 @@ const extractGraphFromBatch = async (articles) => {
                 apiKey: activeKey,
                 maxOutputTokens: 8192,
                 temperature: 0, // Temperature 0 để lấy output chính xác định dạng
+                safetySettings: [
+                    {
+                        category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold: HarmBlockThreshold.BLOCK_NONE,
+                    },
+                    {
+                        category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold: HarmBlockThreshold.BLOCK_NONE,
+                    },
+                    {
+                        category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold: HarmBlockThreshold.BLOCK_NONE,
+                    },
+                    {
+                        category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold: HarmBlockThreshold.BLOCK_NONE,
+                    },
+                ]
             });
 
             const structuredLlm = llm.withStructuredOutput(graphSchema, { name: "extract_graph" });

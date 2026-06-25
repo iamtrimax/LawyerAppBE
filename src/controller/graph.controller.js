@@ -25,7 +25,7 @@ const buildGraphForAllArticles = async (req, res) => {
         let failCount = 0;
         let processedCount = 0;
         let batch = [];
-        const BATCH_SIZE = 10; // Cấu hình kích thước an toàn cho JSON output của Gemini
+        const BATCH_SIZE = 5; // Cấu hình kích thước an toàn hơn cho JSON output của Gemini
 
         for (let article = await cursor.next(); article != null; article = await cursor.next()) {
             batch.push(article);
