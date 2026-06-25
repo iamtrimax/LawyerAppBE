@@ -1,9 +1,56 @@
 const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
 const { HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
+const { StringOutputParser } = require("@langchain/core/output_parsers");
 const { z } = require('zod');
 const { getDriver } = require('../config/neo4j');
 const { generateEmbedding } = require('./embedding.service');
 require('dotenv').config();
+
+function stripHtml(html) {
+    if (!html) return '';
+    return html
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/?(p|div|li|ul|ol|h[1-6]|tr|td|th|table|tbody|thead)[^>]*>/gi, '\n')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function repairJson(jsonStr) {
+    let clean = jsonStr.trim();
+    if (!clean) return '{}';
+    if (clean.startsWith('```json')) {
+        clean = clean.replace(/^```json/, '').replace(/```$/, '').trim();
+    }
+    let openQuotes = 0;
+    for (let i = 0; i < clean.length; i++) {
+        if (clean[i] === '"' && (i === 0 || clean[i-1] !== '\\')) openQuotes++;
+    }
+    if (openQuotes % 2 !== 0) clean += '"';
+    let stack = [];
+    for (let i = 0; i < clean.length; i++) {
+        const char = clean[i];
+        if (char === '"' && (i === 0 || clean[i-1] !== '\\')) {
+            let nextQuote = clean.indexOf('"', i + 1);
+            while (nextQuote !== -1 && clean[nextQuote - 1] === '\\') nextQuote = clean.indexOf('"', nextQuote + 1);
+            if (nextQuote !== -1) i = nextQuote; else break;
+        } else if (char === '{' || char === '[') stack.push(char);
+        else if (char === '}') { if (stack[stack.length - 1] === '{') stack.pop(); }
+        else if (char === ']') { if (stack[stack.length - 1] === '[') stack.pop(); }
+    }
+    while (stack.length > 0) {
+        const last = stack.pop();
+        if (last === '{') clean += '}'; else if (last === '[') clean += ']';
+    }
+    return clean;
+}
 
 // Lấy danh sách các API Keys khả dụng
 const getApiKeys = () => {
@@ -65,16 +112,19 @@ const extractGraphFromBatch = async (articles) => {
                 ]
             });
 
-            const structuredLlm = llm.withStructuredOutput(graphSchema, { name: "extract_graph" });
+            // Không sử dụng structuredLlm nữa để tránh lỗi JSON Parser ngặt nghèo của LangChain
+            // const structuredLlm = llm.withStructuredOutput(graphSchema, { name: "extract_graph" });
+            const parser = new StringOutputParser();
 
             // Nối nội dung các bài viết
             let batchedContent = "";
             articles.forEach((article, index) => {
-                const contentToSend = (article.textContent || article.content || "").substring(0, 10000);
+                const rawContent = article.textContent || article.content || "";
+                const cleanContent = stripHtml(rawContent).substring(0, 10000);
                 batchedContent += `\n\n--- BÀI VIẾT SỐ ${index + 1} ---\n`;
                 batchedContent += `ID: ${article._id}\n`;
                 batchedContent += `Tiêu đề: ${article.title}\n`;
-                batchedContent += `Nội dung: \n${contentToSend}\n`;
+                batchedContent += `Nội dung: \n${cleanContent}\n`;
             });
 
             const prompt = `
@@ -84,18 +134,45 @@ Nhiệm vụ của bạn là phân tích các văn bản pháp luật dưới đ
 DANH SÁCH VĂN BẢN (BATCH):
 ${batchedContent}
 
-Yêu cầu đầu ra dạng JSON bao gồm:
-1. "nodes": Danh sách các thực thể. BẮT BUỘC tạo một node "Document" cho mỗi BÀI VIẾT (Sử dụng ID của bài viết làm định danh theo định dạng 'doc_' + ID).
-2. "relationships": Các mối quan hệ liên kết ("CONTAINS" hoặc "REFERENCES"). Đảm bảo các node thuộc về đúng bài viết của nó (CONTAINS từ Document của bài viết đó).
+Yêu cầu ĐẦU RA BẮT BUỘC LÀ JSON bao gồm:
+{
+  "nodes": [
+    {
+      "id": "doc_123456",
+      "type": "Document | Chapter | Section | Article | Clause | Item",
+      "title": "Tiêu đề ngắn gọn",
+      "content": "Nội dung chi tiết"
+    }
+  ],
+  "relationships": [
+    {
+      "source": "id_nguồn",
+      "target": "id_đích",
+      "type": "CONTAINS | REFERENCES"
+    }
+  ]
+}
 
 Quy tắc:
-- Hãy chia nhỏ văn bản đến mức "Khoản" (hoặc "Điểm").
-- Đảm bảo id của mỗi node là duy nhất (phải gắn thêm _id của bài viết vào id của node để tránh trùng lặp giữa các bài viết, ví dụ: "doc_123456_dieu_1").
-- Trả về JSON chuẩn theo cấu trúc yêu cầu.
+1. BẮT BUỘC tạo một node "Document" cho mỗi BÀI VIẾT (Sử dụng ID của bài viết làm định danh theo định dạng 'doc_' + ID).
+2. Hãy chia nhỏ văn bản đến mức "Khoản" (hoặc "Điểm").
+3. Đảm bảo id của mỗi node là duy nhất (phải gắn thêm _id của bài viết vào id của node để tránh trùng lặp, ví dụ: "doc_123456_dieu_1").
+4. Đảm bảo các node thuộc về đúng bài viết của nó (CONTAINS từ Document của bài viết đó).
+5. KẾT QUẢ TRẢ VỀ PHẢI LÀ CHUỖI JSON HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂN BẢN NÀO KHÁC BÊN NGOÀI JSON.
 `;
             
-            // Gọi LangChain
-            const graphData = await structuredLlm.invoke(prompt);
+            // Gọi LLM thông thường
+            const responseText = await llm.pipe(parser).invoke(prompt);
+
+            let graphData;
+            try {
+                // Tự động sửa lỗi JSON kết thúc dở dang do Gemini bị cắt chữ
+                const cleanJsonText = repairJson(responseText);
+                graphData = JSON.parse(cleanJsonText);
+            } catch (parseError) {
+                console.error("❌ [GraphExtraction] Lỗi parse JSON tự động:", parseError.message);
+                throw parseError; // Ném ra để cơ chế Retry hoạt động
+            }
 
             if (!graphData || !graphData.nodes) {
                 console.warn("⚠️ [GraphExtraction] Định dạng graph không hợp lệ hoặc rỗng.");
