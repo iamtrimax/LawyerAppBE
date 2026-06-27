@@ -39,6 +39,16 @@ const getArticleDetailController = async (req, res) => {
     }
 };
 
+const getArticleBySlugController = async (req, res) => {
+    try {
+        const article = await articleServices.getArticleBySlug(req.params.slug);
+        res.status(200).json({ success: true, data: article });
+    } catch (error) {
+        console.log("getArticleBySlugController error: ", error);
+        res.status(404).json({ success: false, message: error.message });
+    }
+};
+
 const getArticleByLawyerController = async (req, res) => {
     try {
         const articles = await articleServices.getArticleByLawyer(req.lawyer._id);
@@ -122,6 +132,7 @@ module.exports = {
     createArticleController,
     getArticlesController,
     getArticleDetailController,
+    getArticleBySlugController,
     getArticleByLawyerController,
     updateArticleController,
     deleteArticleController,

@@ -11,6 +11,7 @@ const {
     createArticleController,
     getArticlesController,
     getArticleDetailController,
+    getArticleBySlugController,
     getArticleByLawyerController,
     updateArticleController,
     deleteArticleController,
@@ -76,6 +77,8 @@ router.use(globalLimiter);
 // article routes
 router.get("/articles/ai-search", aiSearchController);
 router.get("/articles", getArticlesController);
+// QUAN TRỌNG: route slug phải đặt TRƯỚC route :id để Express không nhầm 'slug' là ID
+router.get("/articles/slug/:slug", getArticleBySlugController);
 router.get("/articles/:id", getArticleDetailController);
 router.post("/articles/create", verifyAccessToken, verifyLawyer, createArticleController);
 router.get("/articles/lawyer/my-articles", verifyAccessToken, verifyLawyer, getArticleByLawyerController);
