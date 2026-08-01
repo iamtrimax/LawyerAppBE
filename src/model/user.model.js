@@ -58,6 +58,14 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    googleId: {
+        type: String,
+        default: ""
+    },
+    avatar: {
+        type: String,
+        default: ""
+    },
     passwordChangedAt: { type: Date }
 });
 

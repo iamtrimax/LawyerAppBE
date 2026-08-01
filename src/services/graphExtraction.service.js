@@ -286,11 +286,11 @@ const saveGraphBatchToNeo4j = async (graphData) => {
                          n.content = $content,
                          n.embedding = $embedding`,
                     {
-                        id: uniqueNodeId,
-                        localId: node.id,
-                        mongoId: mongoId,
-                        type: node.type,
-                        title: node.title,
+                        id: uniqueNodeId || "unknown_id_" + Math.random().toString(36).substring(7),
+                        localId: node.id || "unknown_id",
+                        mongoId: mongoId || "batch_extracted",
+                        type: node.type || "Unknown",
+                        title: node.title || "",
                         content: node.content || "",
                         embedding: node.embedding || []
                     }
@@ -310,8 +310,8 @@ const saveGraphBatchToNeo4j = async (graphData) => {
                         `MATCH (a:KnowledgeNode {id: $sourceId}), (b:KnowledgeNode {id: $targetId})
                          MERGE (a)-[r:${relType}]->(b)`,
                         {
-                            sourceId: uniqueSourceId,
-                            targetId: uniqueTargetId
+                            sourceId: uniqueSourceId || "unknown_source",
+                            targetId: uniqueTargetId || "unknown_target"
                         }
                     )
                 );

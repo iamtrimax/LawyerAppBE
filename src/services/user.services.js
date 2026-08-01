@@ -606,10 +606,114 @@ const getReferralHistory = async (userId) => {
   return referrals;
 };
 
+const googleLogin = async (googleData) => {
+  const { email, fullname, googleId, avatar } = googleData;
+
+  if (!email) {
+    throw new Error("Email không được để trống");
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // 1. Kiểm tra email đã tồn tại trong hệ thống chưa
+  let user = await userModel.findOne({ email: normalizedEmail });
+
+  if (user) {
+    // 2. Kiểm tra role của tài khoản đã tồn tại
+    if (user.role === "lawyer") {
+      throw new Error(
+        "Email này đã được đăng ký tài khoản Luật sư trong hệ thống. Vui lòng đăng nhập bằng cổng Luật sư hoặc sử dụng email khác."
+      );
+    }
+
+    if (user.role === "admin") {
+      throw new Error(
+        "Email này là tài khoản Quản trị viên. Không thể đăng nhập qua cổng Khách hàng."
+      );
+    }
+
+    // Nếu user thuộc role customer hoặc member
+    if (user.isActived === false) {
+      const error = new Error("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    // Tự động xác thực email vì đã đăng nhập qua Google
+    if (!user.isVerified) {
+      user.isVerified = true;
+    }
+
+    if (googleId && !user.googleId) {
+      user.googleId = googleId;
+    }
+
+    if (avatar && !user.avatar) {
+      user.avatar = avatar;
+    }
+  } else {
+    // 3. Nếu chưa tồn tại -> Tạo tài khoản Customer mới
+    const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10);
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(randomPassword, salt);
+
+    user = await userModel.create({
+      email: normalizedEmail,
+      fullname: fullname || normalizedEmail.split("@")[0],
+      password: hashedPassword,
+      role: "customer",
+      isVerified: true,
+      isActived: true,
+      googleId: googleId || "",
+      avatar: avatar || ""
+    });
+  }
+
+  // 4. Tạo JWT Token
+  const accessToken = generateToken(user, "7d");
+  const refreshToken = generateToken(user, "14d");
+
+  user.refreshTokens = refreshToken;
+  await user.save();
+
+  const userRes = user.toObject();
+  delete userRes.password;
+  delete userRes.refreshTokens;
+  delete userRes.otp;
+
+  return { userRes, accessToken, refreshToken };
+};
+
+  abortBookingPayment = async (bookingId, userId) => {
+  try {
+    const booking = await bookingModel.findOne({ _id: bookingId, userID: userId });
+    if (!booking) {
+      throw new Error("Không tìm thấy lịch hẹn");
+    }
+
+    if (booking.status === 'Pending' && booking.paymentStatus === 'Unpaid') {
+      await bookingModel.findByIdAndDelete(bookingId);
+      await Promise.all([
+        client.del(`user_bookings:${userId}`),
+        client.del(`booking_detail:${bookingId}`),
+        client.del(`lawyer_bookings:${booking.lawyerID}`),
+        client.del(`lawyer_booking_detail:${bookingId}`),
+        client.del("admin_dashboard_stats")
+      ]);
+      return true;
+    } else {
+      throw new Error("Không thể huỷ: Lịch hẹn đã được thanh toán hoặc xác nhận");
+    }
+  } catch (error) {
+    throw new Error("Không thể huỷ lịch hẹn: " + error.message);
+  }
+};
+
 module.exports = {
   userRegister,
   verifyEmail,
   userLogin,
+  googleLogin,
   searchLawyerByCategory,
   getLawyerScheduleByLawyerId,
   createBooking,
@@ -621,6 +725,7 @@ module.exports = {
   verifyForgotPasswordOTP,
   resetPassword,
   cancelBooking,
+  abortBookingPayment,
   updateUserRank,
   getUserProfile,
   getReferralHistory

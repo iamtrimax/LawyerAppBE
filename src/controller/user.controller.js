@@ -1,5 +1,5 @@
 const userModel = require("../model/user.model");
-const { userRegister, verifyEmail, userLogin, searchLawyerByCategory, getLawyerScheduleByLawyerId, createBooking, getUserBookings, getBookingDetail, updateUserProfile, changePassword, checkAccountExists, resetPassword, verifyForgotPasswordOTP, cancelBooking, getUserProfile, getReferralHistory } = require("../services/user.services");
+const { userRegister, verifyEmail, userLogin, googleLogin, searchLawyerByCategory, getLawyerScheduleByLawyerId, createBooking, getUserBookings, getBookingDetail, updateUserProfile, changePassword, checkAccountExists, resetPassword, verifyForgotPasswordOTP, cancelBooking, abortBookingPayment, getUserProfile, getReferralHistory } = require("../services/user.services");
 const generateToken = require("../utils/generateToken");
 
 const userRegisterController = async (req, res) => {
@@ -365,10 +365,56 @@ const getReferralHistoryController = async (req, res) => {
   }
 };
 
+
+const googleLoginController = async (req, res) => {
+  const { email, fullname, googleId, avatar } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ success: false, message: "Email là bắt buộc" });
+  }
+
+  try {
+    const result = await googleLogin({ email, fullname, googleId, avatar });
+    res.status(200).json({
+      success: true,
+      message: "Đăng nhập bằng Google thành công",
+      user: result.userRes,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 400;
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Đăng nhập bằng Google thất bại"
+    });
+  }
+};
+
+const abortBookingPaymentController = async (req, res) => {
+  const userId = req.userId;
+  const { bookingId } = req.params;
+
+  try {
+    await abortBookingPayment(bookingId, userId);
+    res.status(200).json({
+      success: true,
+      message: "Đã huỷ giao dịch đặt lịch"
+    });
+  } catch (error) {
+    console.error("Lỗi tại abortBookingPaymentController:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Lỗi server nội bộ"
+    });
+  }
+};
+
 module.exports = {
   userRegisterController,
   verifyEmailController,
   loginController,
+  googleLoginController,
   updateToken,
   searchLawyerByCategoryController,
   getLawyerScheduleByIdController,
@@ -381,6 +427,7 @@ module.exports = {
   resetPasswordController,
   verifyForgotPasswordOTPController,
   cancelBookingController,
+  abortBookingPaymentController,
   getUserProfileController,
   getReferralHistoryController
 };

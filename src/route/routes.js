@@ -1,5 +1,5 @@
 const express = require("express");
-const { userRegisterController, verifyEmailController, loginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController, getUserProfileController, getReferralHistoryController } = require("../controller/user.controller");
+const { userRegisterController, verifyEmailController, loginController, googleLoginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController, abortBookingPaymentController, getUserProfileController, getReferralHistoryController } = require("../controller/user.controller");
 const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController, getLawyersController } = require("../controller/lawyer.controller");
 const verifyAccessToken = require("../../middleware/verifyAccessToken");
 const verifyAdmin = require("../../middleware/verifyAdmin");
@@ -90,6 +90,7 @@ router.post("/articles/:id/download", verifyAccessToken, trackArticleDownloadCon
 router.post("/register", authLimiter, userRegisterController);
 router.post("/verify-email", verifyEmailController);
 router.post("/login", authLimiter, loginController);
+router.post("/google-login", authLimiter, googleLoginController);
 router.post("/update-token", updateToken);
 router.get("/search-lawyer", searchLawyerByCategoryController)
 router.get("/schedule/:lawyerId", getLawyerScheduleByIdController);
@@ -104,6 +105,7 @@ router.post("/forgot-password/check-email", authLimiter, checkAccountExistsContr
 router.post("/forgot-password/verify-otp", verifyForgotPasswordOTPController);
 router.post("/forgot-password/reset", authLimiter, resetPasswordController);
 router.post("/booking/cancel/:bookingId", verifyAccessToken, cancelBookingController);
+router.delete("/booking/abort-payment/:bookingId", verifyAccessToken, abortBookingPaymentController);
 
 // English Legal Data (Feature 3)
 router.get("/legal-resources", getResourcesController);
