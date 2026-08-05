@@ -1,10 +1,15 @@
 const legalFormModel = require("../model/legalForm.model");
 const client = require("../config/redis");
 
+// Ép kiểu chuỗi an toàn: chặn NoSQL injection khi client gửi object qua query params
+const toStr = (value) => (typeof value === 'string' ? value : '');
+
 /**
  * Lấy danh sách văn bản mẫu
  */
 const getForms = async ({ category, page = 1, limit = 10, search }) => {
+    category = toStr(category);
+    search = toStr(search);
     const skip = (page - 1) * limit;
     const query = {};
     if (category) query.category = category;
@@ -146,7 +151,8 @@ const invalidateFormCache = async (category) => {
  * Tìm kiếm văn bản mẫu bằng text index
  */
 const searchForms = async (textQuery) => {
-    if (!textQuery) return [];
+    textQuery = toStr(textQuery);
+    if (!textQuery.trim()) return [];
     return await legalFormModel.find({
         $text: { $search: textQuery }
     }).sort({ score: { $meta: "textScore" } }).limit(20).lean();

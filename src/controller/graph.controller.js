@@ -2,6 +2,7 @@ const Article = require('../model/article.model');
 const { extractGraphFromBatch } = require('../services/graphExtraction.service');
 const { graphSearch } = require('../services/graphSearch.service');
 const { getDriver } = require('../config/neo4j');
+const sanitizeError = require('../utils/sanitizeError');
 
 const buildGraphForAllArticles = async (req, res) => {
     try {
@@ -84,7 +85,7 @@ const buildGraphForArticle = async (req, res) => {
             relationshipsCount: graphData.relationships?.length || 0
         });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: sanitizeError(error) });
     }
 };
 
@@ -110,7 +111,7 @@ const testQueryGraph = async (req, res) => {
             }))
         });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: sanitizeError(error) });
     }
 };
 
@@ -124,7 +125,7 @@ const clearAllGraphData = async (req, res) => {
         await session.executeWrite(tx => tx.run('MATCH (n) DETACH DELETE n'));
         res.status(200).json({ success: true, message: "Đã xóa toàn bộ dữ liệu đồ thị trong Neo4j." });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: sanitizeError(error) });
     } finally {
         await session.close();
     }

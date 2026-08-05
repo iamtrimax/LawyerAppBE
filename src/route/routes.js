@@ -88,10 +88,10 @@ router.post("/articles/:id/download", verifyAccessToken, trackArticleDownloadCon
 
 //user routes
 router.post("/register", authLimiter, userRegisterController);
-router.post("/verify-email", verifyEmailController);
+router.post("/verify-email", authLimiter, verifyEmailController);
 router.post("/login", authLimiter, loginController);
 router.post("/google-login", authLimiter, googleLoginController);
-router.post("/update-token", updateToken);
+router.post("/update-token", verifyAccessToken, updateToken);
 router.get("/search-lawyer", searchLawyerByCategoryController)
 router.get("/schedule/:lawyerId", getLawyerScheduleByIdController);
 router.post("/booking/create", verifyAccessToken, createBookingController);
@@ -102,7 +102,7 @@ router.get("/profile", verifyAccessToken, getUserProfileController);
 router.get("/referrals", verifyAccessToken, getReferralHistoryController);
 router.post("/change-password", verifyAccessToken, changePasswordController);
 router.post("/forgot-password/check-email", authLimiter, checkAccountExistsController);
-router.post("/forgot-password/verify-otp", verifyForgotPasswordOTPController);
+router.post("/forgot-password/verify-otp", authLimiter, verifyForgotPasswordOTPController);
 router.post("/forgot-password/reset", authLimiter, resetPasswordController);
 router.post("/booking/cancel/:bookingId", verifyAccessToken, cancelBookingController);
 router.delete("/booking/abort-payment/:bookingId", verifyAccessToken, abortBookingPaymentController);
@@ -174,7 +174,7 @@ router.delete("/admin/legal-forms/:id", verifyAccessToken, verifyAdmin, deleteFo
 const { buildGraphForAllArticles, buildGraphForArticle, testQueryGraph, clearAllGraphData } = require("../controller/graph.controller");
 router.post("/admin/graph/build-all", verifyAccessToken, verifyAdmin, buildGraphForAllArticles);
 router.post("/admin/graph/build-article/:articleId", verifyAccessToken, verifyAdmin, buildGraphForArticle);
-router.post("/admin/graph/test-query", testQueryGraph);
+router.post("/admin/graph/test-query", verifyAccessToken, verifyAdmin, testQueryGraph);
 router.delete("/admin/graph/clear", verifyAccessToken, verifyAdmin, clearAllGraphData);
 router.get("/admin/lawyers", verifyAccessToken, verifyAdmin, getAllLawyers);
 // payment routes

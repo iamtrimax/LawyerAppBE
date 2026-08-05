@@ -1,6 +1,7 @@
 const userModel = require("../model/user.model");
 const { userRegister, verifyEmail, userLogin, googleLogin, searchLawyerByCategory, getLawyerScheduleByLawyerId, createBooking, getUserBookings, getBookingDetail, updateUserProfile, changePassword, checkAccountExists, resetPassword, verifyForgotPasswordOTP, cancelBooking, abortBookingPayment, getUserProfile, getReferralHistory } = require("../services/user.services");
 const generateToken = require("../utils/generateToken");
+const sanitizeError = require("../utils/sanitizeError");
 
 const userRegisterController = async (req, res) => {
   const { fullname, email, password, phone, role, referralCode, legalInterest } = req.body;
@@ -18,7 +19,7 @@ const userRegisterController = async (req, res) => {
       success: true,
     });
   } catch (error) {
-    return res.status(400).json({ message: error.message });
+    return res.status(400).json({ message: sanitizeError(error) });
   }
 };
 const verifyEmailController = async (req, res) => {
@@ -31,7 +32,7 @@ const verifyEmailController = async (req, res) => {
       success: true,
     });
   } catch (error) {
-    return res.status(400).json({ message: error.message });  
+    return res.status(400).json({ message: sanitizeError(error) });  
   }
 };
 const loginController = async (req, res) => {
@@ -50,29 +51,38 @@ const loginController = async (req, res) => {
       accessToken: user.accessToken,
     });
   } catch (error) {
-    return res.status(400).json({ message: error.message });
+    return res.status(400).json({ message: sanitizeError(error) });
   }
 }
 const updateToken = async (req, res) => {
-  const { userId, token } = req.body;
+  // Chỉ cho phép cập nhật token của chính user đang đăng nhập (req.userId từ verifyAccessToken)
+  const userId = req.userId;
+  const { token } = req.body;
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ message: "Token không hợp lệ" });
+  }
   try {
-    await userModel.findByIdAndUpdate(userId, { expoPushToken: token });
+    await userModel.findByIdAndUpdate(userId, { expoPushToken: token.trim() });
     res.status(200).json({ message: "Cập nhật Token thành công" });
   } catch (error) {
+    console.error("Lỗi tại updateToken:", error);
     res.status(500).json({ message: "Lỗi Server" });
   }
 };
 const searchLawyerByCategoryController = async (req, res) => {
   try {
+    // Ép kiểu chuỗi để chặn NoSQL injection qua query param dạng object ($ne, $regex...)
     const { specialization, province } = req.query;
+    const spec = typeof specialization === 'string' ? specialization.trim() : undefined;
+    const prov = typeof province === 'string' ? province.trim() : undefined;
     let query = {}
 
-    if (specialization && specialization !== 'Tất cả') {
-      query.specialty = specialization;
+    if (spec && spec !== 'Tất cả') {
+      query.specialty = spec;
     }
     
-    if (province && province !== 'Tất cả') {
-      query.operatingProvinces = province;
+    if (prov && prov !== 'Tất cả') {
+      query.operatingProvinces = prov;
     }
 
     query.isApproved = true;
@@ -86,7 +96,7 @@ const searchLawyerByCategoryController = async (req, res) => {
     console.error("Lỗi tại searchLawyerByCategoryController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 }
@@ -102,7 +112,7 @@ const getLawyerScheduleByIdController = async (req, res) => {
     console.error("Lỗi tại getLawyerScheduleByIdController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 }
@@ -133,7 +143,7 @@ const createBookingController = async (req, res) => {
     console.error("Lỗi tại createBookingController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -150,7 +160,7 @@ const getUserBookingsController = async (req, res) => {
     console.error("Lỗi tại getUserBookingsController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -168,7 +178,7 @@ const getBookingDetailController = async (req, res) => {
     console.error("Lỗi tại getBookingDetailController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -187,7 +197,7 @@ const updateUserProfileController = async (req, res) => {
     console.error("Lỗi tại updateUserProfileController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -227,7 +237,7 @@ const changePasswordController = async (req, res) => {
     console.error("Lỗi tại changePasswordController:", error);
     return res.status(400).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -238,19 +248,18 @@ const checkAccountExistsController = async (req, res) => {
     return res.status(400).json({ error: "Vui lòng cung cấp đầy đủ email và vai trò" });
   }
 
+  // Luôn trả về 200 với thông báo giống nhau dù email có tồn tại hay không
+  // để chống user enumeration (service checkAccountExists đã ép kiểu chuỗi chặn NoSQL)
   try {
     await checkAccountExists(email, role);
-    res.status(200).json({
-      success: true,
-      message: "Tài khoản tồn tại. Mã OTP đã được gửi về email của bạn."
-    });
   } catch (error) {
     console.error("Lỗi tại checkAccountExistsController:", error);
-    return res.status(404).json({
-      success: false,
-      message: error.message || "Lỗi server nội bộ"
-    });
   }
+
+  res.status(200).json({
+    success: true,
+    message: "Nếu email tồn tại, mã OTP đã được gửi về email của bạn."
+  });
 };
 
 const resetPasswordController = async (req, res) => {
@@ -269,7 +278,7 @@ const resetPasswordController = async (req, res) => {
     console.error("Lỗi tại resetPasswordController:", error);
     return res.status(400).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -290,7 +299,7 @@ const verifyForgotPasswordOTPController = async (req, res) => {
     console.error("Lỗi tại verifyForgotPasswordOTPController:", error);
     return res.status(400).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -326,7 +335,7 @@ const cancelBookingController = async (req, res) => {
 
     return res.status(statusCode).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -343,7 +352,7 @@ const getUserProfileController = async (req, res) => {
     console.error("Lỗi tại getUserProfileController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -360,7 +369,7 @@ const getReferralHistoryController = async (req, res) => {
     console.error("Lỗi tại getReferralHistoryController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -386,7 +395,7 @@ const googleLoginController = async (req, res) => {
     const statusCode = error.statusCode || 400;
     return res.status(statusCode).json({
       success: false,
-      message: error.message || "Đăng nhập bằng Google thất bại"
+      message: sanitizeError(error)
     });
   }
 };
@@ -405,7 +414,7 @@ const abortBookingPaymentController = async (req, res) => {
     console.error("Lỗi tại abortBookingPaymentController:", error);
     return res.status(400).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };

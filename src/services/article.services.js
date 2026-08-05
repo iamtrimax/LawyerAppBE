@@ -30,8 +30,15 @@ const createArticle = async ({ lawyerId, title, content, category, images, tags,
     }
 };
 
+// Ép kiểu chuỗi an toàn: chặn NoSQL injection khi client gửi object qua query params
+const toStr = (value) => (typeof value === 'string' ? value : '');
+
 const getArticles = async ({ category, tag, page = 1, limit = 10, search }) => {
     const skip = (page - 1) * limit;
+    // Ép kiểu chuỗi để chặn NoSQL injection (category/tag/search dạng object)
+    category = toStr(category);
+    tag = toStr(tag);
+    search = toStr(search);
     const query = { status: 'Published', isPublished: { $ne: false } };
 
     if (category) query.category = category;

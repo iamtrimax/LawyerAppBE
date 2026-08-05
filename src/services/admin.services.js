@@ -7,6 +7,9 @@ const refundModel = require("../model/refund.model");
 const client = require("../config/redis");
 const bcrypt = require("bcryptjs");
 
+// Ép kiểu chuỗi an toàn: chặn NoSQL injection khi client gửi object qua query params
+const toStr = (value) => (typeof value === 'string' ? value : '');
+
 const addLawyerForAdmin = async (userData) => {
   const {
     fullname,
@@ -21,14 +24,26 @@ const addLawyerForAdmin = async (userData) => {
     yearsOfExperience,
   } = userData;
 
-  let user = await userModel.findOne({ email });
+  // Ép kiểu chuỗi để chặn NoSQL injection qua body dạng object
+  const safeEmail = toStr(email).trim().toLowerCase();
+  const safeFullname = toStr(fullname).trim();
+  const safePhone = toStr(phone).trim();
+  const safePassword = toStr(password);
+
+  if (!safeEmail || !safeFullname || !safePassword) {
+    const error = new Error("Vui lòng cung cấp đầy đủ email, họ tên và mật khẩu");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let user = await userModel.findOne({ email: safeEmail });
   if (user) {
     const error = new Error("Tài khoản email này đã tồn tại trong hệ thống.");
     error.statusCode = 400;
     throw error;
   }
 
-  let lawyerProfile = await lawyerModel.findOne({ lawyerId });
+  let lawyerProfile = await lawyerModel.findOne({ lawyerId: toStr(lawyerId) });
   if (lawyerProfile) {
     const error = new Error("Mã thẻ luật sư này đã tồn tại.");
     error.statusCode = 400;
@@ -36,22 +51,26 @@ const addLawyerForAdmin = async (userData) => {
   }
 
   const salt = await bcrypt.genSalt(10);
-  const hashedPassword = await bcrypt.hash(password, salt);
+  const hashedPassword = await bcrypt.hash(safePassword, salt);
 
   user = await userModel.create({
-    fullname,
-    email,
-    phone,
+    fullname: safeFullname,
+    email: safeEmail,
+    phone: safePhone,
     password: hashedPassword,
     role: "lawyer",
     isVerified: true,
     isActived: true,
   });
 
+  const safeSpecialty = Array.isArray(specialty)
+    ? specialty.map(s => toStr(s).trim()).filter(Boolean)
+    : [toStr(specialty).trim()].filter(Boolean);
+
   await lawyerModel.create({
     userID: user._id,
-    lawyerId,
-    specialty: Array.isArray(specialty) ? specialty : [specialty],
+    lawyerId: toStr(lawyerId),
+    specialty: safeSpecialty,
     firmName,
     lawyerCardImage,
     avatar,
@@ -67,17 +86,22 @@ const addLawyerForAdmin = async (userData) => {
   }
   await client.del("admin_dashboard_stats");
 
-  return user;
+  // Không trả password hash / otp / refreshTokens về client
+  const safeUser = user.toObject ? user.toObject() : { ...user };
+  delete safeUser.password;
+  delete safeUser.otp;
+  delete safeUser.refreshTokens;
+  return safeUser;
 };
 
 const approveLawyer = async (lawyerId) => {
   const lawyerProfile = await lawyerModel
     .findOne({ lawyerId: lawyerId })
-    .populate("userID");
+    .populate("userID", "-password -otp -refreshTokens");
   if (!lawyerProfile) {
     return;
   }
-  // Trim specialty Ä‘á»ƒ trÃ¡nh lá»—i enum validation do dá»¯ liá»‡u cÃ³ khoáº£ng tráº¯ng thá»«a
+  // Trim specialty để tránh lỗi enum validation do dữ liệu có khoảng trắng thừa
   if (Array.isArray(lawyerProfile.specialty)) {
     lawyerProfile.specialty = lawyerProfile.specialty.map(s => s.trim());
   }
@@ -326,6 +350,8 @@ const getAllArticlesForAdmin = async ({ page = 1, limit = 10, filter }) => {
 
 const getAllUsersService = async ({ page = 1, limit = 10, roleFilter, search }) => {
   const skip = (page - 1) * limit;
+  search = toStr(search);
+  roleFilter = toStr(roleFilter);
   const query = { role: { $in: ['customer', 'member'] } };
 
   if (roleFilter === 'customer') query.role = 'customer';
@@ -390,6 +416,10 @@ const getArticleDetailForAdmin = async (articleId) => {
 
 const getAllBookingsForAdmin = async ({ page = 1, limit = 10, status, paymentStatus, payoutStatus, search, dateFrom, dateTo }) => {
   const skip = (page - 1) * limit;
+  // Ép kiểu chuỗi: chặn NoSQL injection qua query param dạng object
+  search = toStr(search);
+  dateFrom = toStr(dateFrom);
+  dateTo = toStr(dateTo);
   const query = {};
 
   // Filter by booking status
@@ -505,6 +535,7 @@ const getBookingDetailForAdmin = async (bookingId) => {
 
 const getAllRefundsForAdmin = async ({ page = 1, limit = 10, status, search }) => {
   const skip = (page - 1) * limit;
+  search = toStr(search);
   const query = {};
 
   if (status && ['Pending', 'Processed', 'Rejected'].includes(status)) {

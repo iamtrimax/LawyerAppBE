@@ -6,8 +6,25 @@ const generateToken = require("../utils/generateToken");
 const sendEmail = require("../utils/sendEmail");
 const bcrypt = require("bcryptjs");
 const client = require("../config/redis");
+const sanitizeError = require("../utils/sanitizeError");
+
+// Ép kiểu an toàn: chặn NoSQL injection khi client gửi object (vd: { $ne: "" })
+// thay cho chuỗi ở các trường email/phone/otp/password...
+const toStr = (value) => (typeof value === 'string' ? value : '');
+const toEmail = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
 const userRegister = async (userData) => {
-  const { email, fullname, password, phone, role, referralCode, legalInterest } = userData;
+  const email = toEmail(userData.email);
+  const fullname = toStr(userData.fullname).trim();
+  const password = toStr(userData.password);
+  const phone = toStr(userData.phone).trim();
+  const role = toStr(userData.role);
+  const referralCode = toStr(userData.referralCode).trim();
+  const legalInterest = toStr(userData.legalInterest);
+
+  if (!email || !fullname || !password) {
+    throw new Error("Vui lòng cung cấp đầy đủ thông tin");
+  }
+
   const userExists = await userModel.findOne({ email });
 
   const salt = await bcrypt.genSalt(10);
@@ -61,15 +78,16 @@ const userRegister = async (userData) => {
 };
 
 const verifyEmail = async (email, otp) => {
+  // Ép kiểu chuỗi để chặn NoSQL injection (email dạng object như { $ne: "" })
+  email = toEmail(email);
+  otp = toStr(otp).trim();
+
   // Tìm user trong bảng User (vì cả customer và lawyer đều lưu ở đây)
   const user = await userModel.findOne({ email });
 
-  if (!user) {
-    throw new Error("Tài khoản không tồn tại");
-  }
-
-  // 1. Kiểm tra OTP
-  if (!user.otp || user.otp !== otp) {
+  // 1. Kiểm tra OTP - thông báo giống nhau cho cả user không tồn tại và OTP sai
+  // để chống user enumeration
+  if (!user || !user.otp || user.otp !== otp) {
     throw new Error("Mã OTP không chính xác hoặc đã hết hạn");
   }
 
@@ -106,7 +124,14 @@ const verifyEmail = async (email, otp) => {
   };
 };
 const userLogin = async (userData) => {
-  const { identifier, password, role } = userData;
+  // Ép kiểu chuỗi để chặn NoSQL injection (identifier/password/role dạng object)
+  const identifier = toEmail(userData.identifier);
+  const password = toStr(userData.password);
+  const role = toStr(userData.role);
+
+  if (!identifier || !password || !role) {
+    throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
+  }
 
   // 1. Tìm User theo email hoặc phone và role để đảm bảo đăng nhập đúng cổng
   const user = await userModel.findOne({
@@ -121,9 +146,10 @@ const userLogin = async (userData) => {
     throw error;
   }
 
-  // 2. Kiểm tra mật khẩu
+  // 2. Kiểm tra mật khẩu - thông báo giống hệt trường hợp không tìm thấy user
+  // để chống user enumeration qua login
   const isPasswordValid = await bcrypt.compare(password, user.password);
-  if (!isPasswordValid) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng");
+  if (!isPasswordValid) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
 
   // 3. Xử lý riêng cho Lawyer
   if (role === "lawyer") {
@@ -162,18 +188,28 @@ const userLogin = async (userData) => {
     const refreshToken = generateToken(user, "14d");
 
     const userRes = user.toObject();
+    // Xóa dữ liệu nhạy cảm trước khi trả về client (tránh lộ password hash)
+    delete userRes.password;
     delete userRes.refreshTokens;
     delete userRes.otp;
 
     return { userRes, accessToken, refreshToken };
   }
 };
+// CHỈ các trường công khai cần hiển thị.
+// TUYỆT ĐỐI không trả refreshTokens, expoPushToken, googleId, referredBy, points...
+const PUBLIC_USER_FIELDS = 'fullname email phone avatar role isVerified isActived';
+
 const searchLawyerByCategory = async (query) => {
   const key = `lawyer_search:${JSON.stringify(query)}`;
   const cached = await client.get(key);
   if (cached) return JSON.parse(cached);
 
-  const lawyers = await lawyerModel.find(query).populate('userID', '-password -otp -__v');
+  const lawyers = await lawyerModel
+    .find(query)
+    .select('-__v')
+    .populate('userID', PUBLIC_USER_FIELDS)
+    .lean();
   await client.set(key, JSON.stringify(lawyers), { EX: 300 });
   return lawyers;
 }
@@ -188,13 +224,25 @@ const getLawyerScheduleByLawyerId = async (lawyerId) => {
 }
 
 const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentStatus, addressMeeting, documents, actualPhone }) => {
+  // Ép kiểu an toàn để chặn NoSQL injection (timeSlot dạng object chứa $ne/$regex...)
+  date = toStr(date);
+  actualPhone = toStr(actualPhone).trim();
+  addressMeeting = toStr(addressMeeting);
+
   // 1. Kiểm tra tính hợp lệ (cơ bản)
   if (!userId || !lawyerId || !date || !timeSlot || !actualPhone) {
     throw new Error("Thiếu thông tin đặt lịch (Số điện thoại liên hệ là bắt buộc)");
   }
 
-  // 2. Validate time slot
-  if (!timeSlot.start || !timeSlot.end) {
+  // 2. Validate time slot: phải là object thường với start/end là chuỗi giờ
+  if (typeof timeSlot !== 'object' || Array.isArray(timeSlot)) {
+    throw new Error("Thông tin time slot không hợp lệ");
+  }
+  const safeSlot = {
+    start: toStr(timeSlot.start),
+    end: toStr(timeSlot.end)
+  };
+  if (!safeSlot.start || !safeSlot.end) {
     throw new Error("Thông tin time slot không hợp lệ");
   }
 
@@ -203,8 +251,8 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
   const existingSlotBooking = await bookingModel.findOne({
     lawyerID: lawyerId,
     date: date,
-    'timeSlot.start': timeSlot.start,
-    'timeSlot.end': timeSlot.end,
+    'timeSlot.start': safeSlot.start,
+    'timeSlot.end': safeSlot.end,
     status: { $ne: 'Cancelled' } // Không tính các booking đã hủy
   });
 
@@ -230,7 +278,7 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
       userID: userId,
       lawyerID: lawyerId,
       date: date,
-      timeSlot: timeSlot,
+      timeSlot: safeSlot,
       price: price || 0,
       paymentStatus: paymentStatus || 'Unpaid',
       status: 'Pending',
@@ -278,7 +326,8 @@ const getUserBookings = async (userId) => {
     await client.set(key, JSON.stringify(bookings), { EX: 600 }); // Cache trong 10 phút
     return bookings;
   } catch (error) {
-    throw new Error("Không thể lấy danh sách cuộc hẹn: " + error.message);
+    // Không nối error.message trực tiếp (có thể chứa nội dung CastError/stack nội bộ)
+    throw new Error("Không thể lấy danh sách cuộc hẹn: " + sanitizeError(error));
   }
 };
 
@@ -313,15 +362,23 @@ const getBookingDetail = async (bookingId, userId) => {
     await client.set(key, JSON.stringify(booking), { EX: 3600 }); // Cache trong 1 giờ
     return booking;
   } catch (error) {
-    throw new Error("Không thể lấy chi tiết cuộc hẹn: " + error.message);
+    // Không nối error.message trực tiếp (có thể chứa nội dung CastError/stack nội bộ)
+    throw new Error("Không thể lấy chi tiết cuộc hẹn: " + sanitizeError(error));
   }
 };
 
 const updateUserProfile = async (userId, updateData) => {
-  const { fullname, phone } = updateData;
+  // Ép kiểu chuỗi để chặn NoSQL injection / mass-assignment qua body dạng object
+  const fullname = toStr(updateData.fullname).trim();
+  const phone = toStr(updateData.phone).trim();
+
+  const updateFields = {};
+  if (fullname) updateFields.fullname = fullname;
+  if (phone) updateFields.phone = phone;
+
   const updatedUser = await userModel.findByIdAndUpdate(
     userId,
-    { fullname, phone },
+    updateFields,
     { new: true, runValidators: true }
   ).select('fullname email phone role');
 
@@ -358,9 +415,15 @@ const changePassword = async (userId, oldPassword, newPassword, confirmPassword)
 };
 
 const checkAccountExists = async (email, role) => {
+  // Ép kiểu chuỗi để chặn NoSQL injection
+  email = toEmail(email);
+  role = toStr(role);
+
   const user = await userModel.findOne({ email, role });
+  // KHÔNG throw khi tài khoản không tồn tại: trả về null để controller
+  // phản hồi giống hệt trường hợp thành công => chống user enumeration
   if (!user || !user.isVerified) {
-    throw new Error("Tài khoản không tồn tại hoặc chưa được xác minh");
+    return null;
   }
 
   // Tạo OTP ngẫu nhiên 6 chữ số
@@ -375,19 +438,20 @@ const checkAccountExists = async (email, role) => {
     await sendEmail(email, "Mã OTP đặt lại mật khẩu", `Mã OTP của bạn là: ${otp}. Mã này dùng để xác nhận việc đặt lại mật khẩu.`);
   } catch (error) {
     console.error("Lỗi khi gửi email OTP:", error);
-    throw new Error("Không thể gửi email OTP. Vui lòng thử lại sau.");
   }
 
   return user;
 };
 
 const verifyForgotPasswordOTP = async (email, otp, role) => {
-  const user = await userModel.findOne({ email, role });
-  if (!user || !user.isVerified) {
-    throw new Error("Tài khoản không tồn tại");
-  }
+  // Ép kiểu chuỗi để chặn NoSQL injection
+  email = toEmail(email);
+  otp = toStr(otp).trim();
+  role = toStr(role);
 
-  if (!user.otp || user.otp !== otp) {
+  const user = await userModel.findOne({ email, role });
+  // Thông báo giống nhau cho mọi trường hợp để chống user enumeration
+  if (!user || !user.isVerified || !user.otp || user.otp !== otp) {
     throw new Error("Mã OTP không chính xác hoặc đã hết hạn");
   }
 
@@ -395,17 +459,24 @@ const verifyForgotPasswordOTP = async (email, otp, role) => {
 };
 
 const resetPassword = async (email, otp, newPassword, confirmPassword, role) => {
+  // Ép kiểu chuỗi để chặn NoSQL injection
+  email = toEmail(email);
+  otp = toStr(otp).trim();
+  newPassword = toStr(newPassword);
+  confirmPassword = toStr(confirmPassword);
+  role = toStr(role);
+
+  if (!email || !otp || !newPassword || !confirmPassword || !role) {
+    throw new Error("Vui lòng cung cấp đầy đủ thông tin (bao gồm mã OTP và vai trò)");
+  }
+
   if (newPassword !== confirmPassword) {
     throw new Error("Mật khẩu mới và xác nhận mật khẩu không khớp");
   }
 
   const user = await userModel.findOne({ email, role });
-  if (!user || !user.isVerified) {
-    throw new Error("Tài khoản không tồn tại");
-  }
-
-  // Xác thực OTP
-  if (!user.otp || user.otp !== otp) {
+  // Thông báo giống nhau cho mọi trường hợp để chống user enumeration
+  if (!user || !user.isVerified || !user.otp || user.otp !== otp) {
     throw new Error("Mã OTP không chính xác hoặc đã hết hạn");
   }
 
@@ -549,7 +620,7 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
       }
     };
   } catch (error) {
-    throw new Error("Không thể huỷ lịch hẹn: " + error.message);
+    throw new Error("Không thể huỷ lịch hẹn: " + sanitizeError(error));
   }
 };
 
@@ -609,11 +680,15 @@ const getReferralHistory = async (userId) => {
 const googleLogin = async (googleData) => {
   const { email, fullname, googleId, avatar } = googleData;
 
-  if (!email) {
+  // Ép kiểu chuỗi để chặn NoSQL injection / lỗi crash khi email là object
+  const normalizedEmail = toEmail(email);
+  const safeFullname = toStr(fullname).trim();
+  const safeGoogleId = toStr(googleId);
+  const safeAvatar = toStr(avatar);
+
+  if (!normalizedEmail) {
     throw new Error("Email không được để trống");
   }
-
-  const normalizedEmail = email.toLowerCase().trim();
 
   // 1. Kiểm tra email đã tồn tại trong hệ thống chưa
   let user = await userModel.findOne({ email: normalizedEmail });
@@ -659,13 +734,13 @@ const googleLogin = async (googleData) => {
 
     user = await userModel.create({
       email: normalizedEmail,
-      fullname: fullname || normalizedEmail.split("@")[0],
+      fullname: safeFullname || normalizedEmail.split("@")[0],
       password: hashedPassword,
       role: "customer",
       isVerified: true,
       isActived: true,
-      googleId: googleId || "",
-      avatar: avatar || ""
+      googleId: safeGoogleId || "",
+      avatar: safeAvatar || ""
     });
   }
 
@@ -705,7 +780,7 @@ const googleLogin = async (googleData) => {
       throw new Error("Không thể huỷ: Lịch hẹn đã được thanh toán hoặc xác nhận");
     }
   } catch (error) {
-    throw new Error("Không thể huỷ lịch hẹn: " + error.message);
+    throw new Error("Không thể huỷ lịch hẹn: " + sanitizeError(error));
   }
 };
 

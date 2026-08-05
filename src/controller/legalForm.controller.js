@@ -1,5 +1,6 @@
 const legalFormServices = require("../services/legalForm.services");
 const userModel = require("../model/user.model");
+const sanitizeError = require("../utils/sanitizeError");
 
 const getFormsController = async (req, res) => {
     try {
@@ -20,7 +21,7 @@ const getFormsController = async (req, res) => {
         res.status(200).json({ success: true, ...result });
     } catch (error) {
         console.error("getFormsController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -38,7 +39,7 @@ const getFormDetailController = async (req, res) => {
         res.status(200).json({ success: true, data: form });
     } catch (error) {
         console.error("getFormDetailController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -59,7 +60,7 @@ const searchFormsController = async (req, res) => {
         res.status(200).json({ success: true, data: forms });
     } catch (error) {
         console.error("searchFormsController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -80,7 +81,7 @@ const trackDownloadController = async (req, res) => {
         res.status(200).json({ success: true, data: form });
     } catch (error) {
         console.error("trackDownloadController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -90,7 +91,7 @@ const createFormController = async (req, res) => {
         res.status(201).json({ success: true, data: form });
     } catch (error) {
         console.error("createFormController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -100,7 +101,7 @@ const updateFormController = async (req, res) => {
         res.status(200).json({ success: true, data: form });
     } catch (error) {
         console.error("updateFormController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -110,7 +111,7 @@ const deleteFormController = async (req, res) => {
         res.status(200).json({ success: true, message: "Xóa văn bản thành công" });
     } catch (error) {
         console.error("deleteFormController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -124,7 +125,7 @@ const createLawyerFormController = async (req, res) => {
         res.status(201).json({ success: true, data: form });
     } catch (error) {
         console.error("createLawyerFormController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -137,7 +138,7 @@ const getMyFormsController = async (req, res) => {
         res.status(200).json({ success: true, data: forms });
     } catch (error) {
         console.error("getMyFormsController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -150,7 +151,7 @@ const updateMyFormController = async (req, res) => {
         res.status(200).json({ success: true, data: form });
     } catch (error) {
         console.error("updateMyFormController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -163,7 +164,7 @@ const deleteMyFormController = async (req, res) => {
         res.status(200).json({ success: true, message: "Xóa biểu mẫu thành công" });
     } catch (error) {
         console.error("deleteMyFormController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -199,7 +200,7 @@ const viewFileController = async (req, res) => {
         response.data.pipe(res);
     } catch (error) {
         console.error("viewFileController error:", error.message);
-        res.status(500).json({ success: false, message: "Không thể tải file: " + error.message });
+        res.status(500).json({ success: false, message: "Không thể tải file: " + sanitizeError(error) });
     }
 };
 

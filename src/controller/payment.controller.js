@@ -1,5 +1,6 @@
 const { verifySePayWebhook, createSePayPaymentUrl, createMemberUpgradePayment, getMemberUpgradePaymentStatus, processPaymentWebhook } = require("../services/payment.services");
 
+const sanitizeError = require("../utils/sanitizeError");
 const handleSePayWebhookController = async (req, res) => {
     try {
         const data = req.body;
@@ -23,7 +24,7 @@ const handleSePayWebhookController = async (req, res) => {
         console.error("SePay Webhook Error:", error.message);
         return res.status(400).json({
             success: false,
-            message: error.message || "Webhook processing failed"
+            message: sanitizeError(error)
         });
     }
 };
@@ -51,7 +52,7 @@ const createPaymentLinkController = async (req, res) => {
         console.error("Create Payment Link Error:", error.message);
         return res.status(500).json({
             success: false,
-            message: error.message || "Failed to create payment link"
+            message: sanitizeError(error)
         });
     }
 }
@@ -75,7 +76,7 @@ const createMemberUpgradePaymentController = async (req, res) => {
         console.error("Create Member Upgrade Payment Error:", error.message);
         return res.status(400).json({
             success: false,
-            message: error.message || "Failed to create member upgrade payment"
+            message: sanitizeError(error)
         });
     }
 }
@@ -95,7 +96,7 @@ const getMemberUpgradePaymentStatusController = async (req, res) => {
         console.error("Get Member Upgrade Payment Status Error:", error.message);
         return res.status(404).json({
             success: false,
-            message: error.message || "Failed to get member upgrade payment status"
+            message: sanitizeError(error)
         });
     }
 }

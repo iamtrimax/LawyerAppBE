@@ -277,6 +277,8 @@ const updateLawyerProfile = async (userId, lawyerId, updateData) => {
 };
 
 const getLawyers = async (specialization) => {
+  // Ép kiểu chuỗi để chặn NoSQL injection qua query param dạng object
+  specialization = (typeof specialization === 'string' ? specialization : '').trim();
   const key = `lawyers_list:${specialization || 'all'}`;
   const cached = await client.get(key);
   if (cached) return JSON.parse(cached);

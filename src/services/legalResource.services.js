@@ -1,10 +1,16 @@
 const legalResourceModel = require("../model/legalResource.model");
 const client = require("../config/redis");
 
+// Ép kiểu chuỗi an toàn: chặn NoSQL injection khi client gửi object qua query params
+const toStr = (value) => (typeof value === 'string' ? value : '');
+
 /**
  * Lấy danh sách tài liệu tiếng Anh theo chuyên mục
  */
 const getResources = async ({ category, language = 'English', page = 1, limit = 10, search }) => {
+    category = toStr(category);
+    language = toStr(language) || 'English';
+    search = toStr(search);
     const skip = (page - 1) * limit;
     const query = { language, isPublished: true };
     if (category) query.category = category;
@@ -60,7 +66,9 @@ const getResourceDetail = async (id) => {
  * Tìm kiếm tài liệu bằng text index
  */
 const searchResources = async (textQuery, language = 'English') => {
-    if (!textQuery) return [];
+    textQuery = toStr(textQuery);
+    language = toStr(language) || 'English';
+    if (!textQuery.trim()) return [];
 
     return await legalResourceModel.find({
         $text: { $search: textQuery },

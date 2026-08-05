@@ -1,4 +1,5 @@
 const legalResourceServices = require("../services/legalResource.services");
+const sanitizeError = require("../utils/sanitizeError");
 
 const getResourcesController = async (req, res) => {
     try {
@@ -13,7 +14,7 @@ const getResourcesController = async (req, res) => {
         res.status(200).json({ success: true, ...result });
     } catch (error) {
         console.error("getResourcesController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -24,7 +25,7 @@ const getResourceDetailController = async (req, res) => {
         res.status(200).json({ success: true, data: resource });
     } catch (error) {
         console.error("getResourceDetailController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -35,7 +36,7 @@ const searchResourcesController = async (req, res) => {
         res.status(200).json({ success: true, data: resources });
     } catch (error) {
         console.error("searchResourcesController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -45,7 +46,7 @@ const createResourceController = async (req, res) => {
         res.status(201).json({ success: true, data: resource });
     } catch (error) {
         console.error("createResourceController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -55,7 +56,7 @@ const updateResourceController = async (req, res) => {
         res.status(200).json({ success: true, data: resource });
     } catch (error) {
         console.error("updateResourceController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -65,7 +66,7 @@ const deleteResourceController = async (req, res) => {
         res.status(200).json({ success: true, message: "Xóa tài liệu thành công" });
     } catch (error) {
         console.error("deleteResourceController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 

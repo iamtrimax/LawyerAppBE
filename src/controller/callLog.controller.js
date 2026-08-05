@@ -1,5 +1,6 @@
 const callLogServices = require('../services/callLog.services');
 const mongoose = require('mongoose');
+const sanitizeError = require('../utils/sanitizeError');
 
 /**
  * Lấy danh sách nhật ký cuộc gọi của người dùng hiện tại
@@ -18,7 +19,7 @@ const getCallLogs = async (req, res) => {
         res.status(200).json({ success: true, data });
     } catch (error) {
         console.error("getCallLogs error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -45,7 +46,7 @@ const createCallLog = async (req, res) => {
         res.status(201).json({ success: true, data: log });
     } catch (error) {
         console.error("createCallLog error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -75,7 +76,7 @@ const updateCallLog = async (req, res) => {
         res.status(200).json({ success: true, data: log });
     } catch (error) {
         console.error("updateCallLog error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -99,7 +100,7 @@ const deleteCallLog = async (req, res) => {
         res.status(200).json({ success: true, message: "Xóa nhật ký cuộc gọi thành công" });
     } catch (error) {
         console.error("deleteCallLog error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -114,7 +115,7 @@ const clearCallLogs = async (req, res) => {
         res.status(200).json({ success: true, message: "Xóa toàn bộ nhật ký cuộc gọi thành công" });
     } catch (error) {
         console.error("clearCallLogs error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 

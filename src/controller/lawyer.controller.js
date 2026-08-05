@@ -1,6 +1,7 @@
 const { lawyerRegister, getUserDetail, updateSchedule, getMySchedule, getLawyerBookings, getLawyerBookingDetail, confirmBookingPayment, updateLawyerProfile, getLawyers } = require("../services/lawyer.services");
 const client = require("../config/redis");
 const generateToken = require("../utils/generateToken");
+const sanitizeError = require("../utils/sanitizeError");
 
 const getLawyersController = async (req, res) => {
   try {
@@ -14,7 +15,7 @@ const getLawyersController = async (req, res) => {
     console.error("Lỗi tại getLawyersController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -100,7 +101,7 @@ const lawyerRegisterController = async (req, res) => {
     console.error("Lỗi tại lawyerRegisterController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -129,7 +130,7 @@ const getLawyerDetailController = async (req, res) => {
     console.error("Lỗi tại getLawyerDetailController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 }
@@ -147,7 +148,7 @@ const updateScheduleController = async (req, res) => {
     console.error("Lỗi tại updateScheduleController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -163,7 +164,7 @@ const getMyScheduleController = async (req, res) => {
     console.error("Lỗi tại getMyScheduleController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };
@@ -174,7 +175,7 @@ const getLawyerBookingsController = async (req, res) => {
     res.status(200).json({ success: true, data: bookings });
   } catch (error) {
     console.error("Lỗi tại getLawyerBookingsController:", error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: sanitizeError(error) });
   }
 };
 
@@ -194,7 +195,7 @@ const getLawyerBookingDetailController = async (req, res) => {
     res.status(200).json({ success: true, data: booking });
   } catch (error) {
     console.error("Lỗi tại getLawyerBookingDetailController:", error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: sanitizeError(error) });
   }
 };
 
@@ -218,7 +219,7 @@ const confirmBookingPaymentController = async (req, res) => {
     });
   } catch (error) {
     console.error("Lỗi tại confirmBookingPaymentController:", error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: sanitizeError(error) });
   }
 };
 
@@ -239,7 +240,7 @@ const updateLawyerProfileController = async (req, res) => {
     console.error("Lỗi tại updateLawyerProfileController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ"
+      message: sanitizeError(error)
     });
   }
 };

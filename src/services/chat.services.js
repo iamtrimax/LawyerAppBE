@@ -19,21 +19,54 @@ const getOrCreateConversation = async (participant1, participant2) => {
 };
 
 /**
+ * Kiểm tra quyền truy cập hội thoại: phải là participant,
+ * hoặc là luật sư/admin đối với hội thoại broadcast (câu hỏi chung)
+ */
+const assertCanAccessConversation = async (conversationID, userID, role) => {
+    const conversation = await chatConversationModel.findById(conversationID);
+    if (!conversation) {
+        const error = new Error("Hội thoại không tồn tại");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const isParticipant = Array.isArray(conversation.participants) &&
+        conversation.participants.some(p => p && p.toString() === userID.toString());
+
+    const isAllowedBroadcast = conversation.isBroadcast &&
+        (role === 'lawyer' || role === 'admin');
+
+    if (!isParticipant && !isAllowedBroadcast) {
+        const error = new Error("Bạn không có quyền truy cập hội thoại này");
+        error.statusCode = 403;
+        throw error;
+    }
+
+    return conversation;
+};
+
+/**
  * Lưu tin nhắn và cập nhật tin nhắn cuối cùng của hội thoại
  */
-const saveMessage = async ({ conversationID, senderID, text, attachments }) => {
+const saveMessage = async ({ conversationID, senderID, text, attachments, senderRole }) => {
+    // Chặn IDOR: người gửi phải là participant (hoặc luật sư/admin với broadcast)
+    await assertCanAccessConversation(conversationID, senderID, senderRole);
+
+    // Ép kiểu chuỗi để tránh lưu object/NoSQL injection vào DB
+    const safeText = typeof text === 'string' ? text.slice(0, 5000) : '';
+
     const message = await chatMessageModel.create({
         conversationID,
         senderID,
-        text,
-        attachments: attachments || []
+        text: safeText,
+        attachments: Array.isArray(attachments) ? attachments : []
     });
 
     // Cập nhật lastMessage và thêm senderID vào participants nếu chưa có
     await chatConversationModel.findByIdAndUpdate(conversationID, {
         $set: {
             lastMessage: {
-                text,
+                text: safeText,
                 senderID,
                 createdAt: message.createdAt
             }
@@ -81,9 +114,12 @@ const getConversationList = async (userID) => {
 };
 
 /**
- * Lấy lịch sử tin nhắn
+ * Lấy lịch sử tin nhắn (chỉ participant hoặc luật sư/admin với broadcast)
  */
-const getMessageHistory = async (conversationID, page = 1, limit = 20) => {
+const getMessageHistory = async (conversationID, userID, role, page = 1, limit = 20) => {
+    // Chặn IDOR: chỉ participant mới đọc được tin nhắn của hội thoại
+    await assertCanAccessConversation(conversationID, userID, role);
+
     const skip = (page - 1) * limit;
     const messages = await chatMessageModel.find({ conversationID })
         .sort({ createdAt: -1 })

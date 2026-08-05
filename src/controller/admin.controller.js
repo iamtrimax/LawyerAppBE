@@ -1,5 +1,6 @@
 const { default: Expo } = require("expo-server-sdk");
 const { addLawyerForAdmin, approveLawyer, getLawyerDetailForAdmin, getAllLawyersService, deleteUserAccount, lockUserAccount, unlockUserAccount, approveArticle, getAllArticlesForAdmin, getAllUsersService, deleteArticleForAdmin, getArticleDetailForAdmin, getAllBookingsForAdmin, getBookingDetailForAdmin, getAllRefundsForAdmin, processRefundForAdmin, getDashboardStatsForAdmin } = require("../services/admin.services");
+const sanitizeError = require("../utils/sanitizeError");
 
 let expo = new Expo();
 
@@ -10,7 +11,7 @@ const getLawyerDetailForAdminController = async (req, res) => {
     if (!lawyerProfile) {
       return res.status(404).json({
         success: false,
-        message: "KhÃ´ng tÃ¬m tháº¥y thÃ´ng tin luáº­t sÆ°",
+        message: "Không tìm thấy thông tin luật sư",
       });
     }
     res.status(200).json({
@@ -21,7 +22,7 @@ const getLawyerDetailForAdminController = async (req, res) => {
     console.error("Lá»—i táº¡i getLawyerDetailForAdminController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lá»—i server ná»™i bá»™",
+      message: sanitizeError(error),
     });
   }
 };
@@ -33,45 +34,45 @@ const aprroveLawyerController = async (req, res) => {
     if (!approvedLawyer) {
       return res
         .status(404)
-        .json({ message: "KhÃ´ng tÃ¬m tháº¥y luáº­t sÆ° Ä‘á»ƒ phÃª duyá»‡t" });
+        .json({ message: "Không tìm thấy luật sư để phê duyệt" });
     }
     const user = approvedLawyer.userID;
     const pushToken = user.expoPushToken;
     if (pushToken && Expo.isExpoPushToken(pushToken)) {
-      // Gá»­i thÃ´ng bÃ¡o Ä‘áº©y
+      // Gửi thông báo đẩy
       const messages = [
         {
           to: pushToken,
           sound: "default",
-          title: "ðŸŽ‰ ChÃºc má»«ng! Há»“ sÆ¡ Ä‘Ã£ Ä‘Æ°á»£c duyá»‡t",
-          body: `ChÃ o Luáº­t sÆ° ${user.fullname}, há»“ sÆ¡ cá»§a báº¡n Ä‘Ã£ Ä‘Æ°á»£c phÃª duyá»‡t thÃ nh cÃ´ng. vul lÃ²ng thoÃ¡t á»©ng dá»¥ng vÃ  vÃ o láº¡i Ä‘á»ƒ cáº­p nháº­t tráº¡ng thÃ¡i`,
-          data: { screen: "HomeScreen" }, // Dá»¯ liá»‡u Ä‘á»ƒ App xá»­ lÃ½ khi nháº¥n vÃ o
+          title: "🎉 Chúc mừng! Hồ sơ đã được duyệt",
+          body: `Chào Luật sư ${user.fullname}, hồ sơ của bạn đã được phê duyệt thành công. vul lòng thoát ứng dụng và vào lại để cập nhật trạng thái`,
+          data: { screen: "HomeScreen" }, // Dữ liệu để App xử lý khi nhấn vào
         },
       ];
-      // Expo yÃªu cáº§u gá»­i theo "chunks" Ä‘á»ƒ tá»‘i Æ°u hiá»‡u suáº¥t
+      // Expo yêu cầu gửi theo "chunks" để tối ưu hiệu suất
       let chunks = expo.chunkPushNotifications(messages);
       for (let chunk of chunks) {
         try {  
           await expo.sendPushNotificationsAsync(chunk);
         } catch (error) {
-          console.error("Lá»—i khi gá»­i chunk thÃ´ng bÃ¡o:", error);
+          console.error("Lỗi khi gửi chunk thông báo:", error);
         }
       }
       return res.status(200).json({
-        message: "Luáº­t sÆ° Ä‘Ã£ Ä‘Æ°á»£c phÃª duyá»‡t vÃ  thÃ´ng bÃ¡o Ä‘Ã£ Ä‘Æ°á»£c gá»­i",
+        message: "Luật sư đã được phê duyệt và thông báo đã được gửi",
         success: true,
       });
     } else {
       console.log("====================================");
-      console.log("user chÆ°a cÃ³ push token há»£p lá»‡, khÃ´ng thá»ƒ gá»­i thÃ´ng bÃ¡o");
+      console.log("user chưa có push token hợp lệ, không thể gửi thông báo");
       console.log("====================================");
       return res.status(200).json({
-        message: "Luáº­t sÆ° Ä‘Ã£ Ä‘Æ°á»£c phÃª duyá»‡t (khÃ´ng gá»­i Ä‘Æ°á»£c thÃ´ng bÃ¡o do chÆ°a cÃ³ push token)",
+        message: "Luật sư đã được phê duyệt (không gửi được thông báo do chưa có push token)",
         success: true,
       });
     }
   } catch (error) {
-    return res.status(400).json({ message: error.message });
+    return res.status(400).json({ message: sanitizeError(error) });
   }
 };
 
@@ -101,7 +102,7 @@ const deleteUserAccountController = async (req, res) => {
     console.error("Lỗi tại deleteUserAccountController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -122,7 +123,7 @@ const lockUserAccountController = async (req, res) => {
     console.error("Lỗi tại lockUserAccountController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -138,7 +139,7 @@ const getAllLawyersController = async(req, res)=>{
     console.error("Lá»—i táº¡i getAllLawyersController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lá»—i server ná»™i bá»™",
+      message: sanitizeError(error),
     });
   }
 }
@@ -156,7 +157,7 @@ const unlockUserAccountController = async (req, res) => {
     console.error("Lỗi tại unlockUserAccountController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -174,7 +175,7 @@ const approveArticleController = async (req, res) => {
     console.error("Lỗi tại approveArticleController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -191,7 +192,7 @@ const getAllArticlesController = async (req, res) => {
     console.error("Lỗi tại getAllArticlesController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -208,7 +209,7 @@ const getAllUsersController = async (req, res) => {
     console.error("Lỗi tại getAllUsersController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -224,7 +225,7 @@ const deleteArticleAdminController = async (req, res) => {
     console.error("Lỗi tại deleteArticleController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -240,7 +241,7 @@ const getArticleDetailAdminController = async (req, res) => {
     console.error("Lỗi tại getArticleDetailAdminController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -266,7 +267,7 @@ const getAllBookingsAdminController = async (req, res) => {
     console.error("Lỗi tại getAllBookingsAdminController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -282,7 +283,7 @@ const getBookingDetailAdminController = async (req, res) => {
     console.error("Lỗi tại getBookingDetailAdminController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -304,7 +305,7 @@ const getAllRefundsAdminController = async (req, res) => {
     console.error("Lỗi tại getAllRefundsAdminController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -330,7 +331,7 @@ const processRefundAdminController = async (req, res) => {
     console.error("Lỗi tại processRefundAdminController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -346,7 +347,7 @@ const getDashboardStatsAdminController = async (req, res) => {
     console.error("Lỗi tại getDashboardStatsAdminController:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };
@@ -363,7 +364,7 @@ const addLawyerAdminController = async (req, res) => {
     console.error("Lỗi tại addLawyerAdminController:", error);
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Lỗi server nội bộ",
+      message: sanitizeError(error),
     });
   }
 };

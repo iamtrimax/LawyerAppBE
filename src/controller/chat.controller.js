@@ -3,6 +3,7 @@ const chatServices = require('../services/chat.services');
 const chatConversationModel = require('../model/chatConversation.model');
 const userModel = require('../model/user.model');
 const { sendPushNotification } = require('../services/notification.services');
+const sanitizeError = require('../utils/sanitizeError');
 
 const startChatController = async (req, res) => {
     try {
@@ -14,7 +15,7 @@ const startChatController = async (req, res) => {
         res.status(200).json({ success: true, data: conversation });
     } catch (error) {
         console.error("startChatController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -39,6 +40,9 @@ const createBroadcastController = async (req, res) => {
             }
         }
 
+        // Ép kiểu chuỗi để chặn lưu object/NoSQL injection
+        text = (typeof text === 'string' ? text : '').slice(0, 5000);
+
         // Tạo hội thoại chung (broadcast)
         const conversation = await chatServices.createBroadcastConversation(senderID);
 
@@ -47,7 +51,8 @@ const createBroadcastController = async (req, res) => {
             conversationID: conversation._id,
             senderID,
             text,
-            attachments: parsedAttachments
+            attachments: parsedAttachments,
+            senderRole: req.user.role
         });
 
         // Thông báo đến tất cả luật sư (nếu có logic socket/notification)
@@ -66,7 +71,7 @@ const createBroadcastController = async (req, res) => {
         res.status(201).json({ success: true, data: { conversation, message } });
     } catch (error) {
         console.error("createBroadcastController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -81,7 +86,7 @@ const getBroadcastsController = async (req, res) => {
         res.status(200).json({ success: true, data: broadcasts });
     } catch (error) {
         console.error("getBroadcastsController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -91,7 +96,7 @@ const getConversationsController = async (req, res) => {
         res.status(200).json({ success: true, data: conversations });
     } catch (error) {
         console.error("getConversationsController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -106,6 +111,8 @@ const getMessagesController = async (req, res) => {
         const { page, limit } = req.query;
         const history = await chatServices.getMessageHistory(
             conversationID,
+            req.user._id,
+            req.user.role,
             parseInt(page) || 1,
             parseInt(limit) || 20
         );
@@ -116,7 +123,7 @@ const getMessagesController = async (req, res) => {
         res.status(200).json({ success: true, ...history });
     } catch (error) {
         console.error("getMessagesController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -124,10 +131,14 @@ const sendMessageController = async (req, res) => {
     try {
         let { conversationID, text, attachments } = req.body;
         const senderID = req.user._id;
+        const senderRole = req.user.role;
 
         if (!mongoose.Types.ObjectId.isValid(conversationID)) {
             return res.status(400).json({ success: false, message: "Mã hội thoại không hợp lệ" });
         }
+
+        // Ép kiểu chuỗi để chặn lưu object/NoSQL injection
+        text = (typeof text === 'string' ? text : '').slice(0, 5000);
 
         let parsedAttachments = [];
         if (Array.isArray(attachments)) {
@@ -145,7 +156,8 @@ const sendMessageController = async (req, res) => {
             conversationID,
             senderID,
             text,
-            attachments: parsedAttachments
+            attachments: parsedAttachments,
+            senderRole
         });
 
         // Gửi qua socket và Push Notification
@@ -191,7 +203,7 @@ const sendMessageController = async (req, res) => {
         res.status(201).json({ success: true, data: message });
     } catch (error) {
         console.error("sendMessageController error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 

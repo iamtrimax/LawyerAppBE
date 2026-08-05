@@ -22,7 +22,37 @@ process.on('SIGINT', async () => {
 });
 
 
-app.use(cors());
+// Ẩn header X-Powered-By: Express (giảm lộ thông tin stack)
+app.disable('x-powered-by');
+
+// CORS: chỉ cho phép origin của chính dự án + request không có Origin (app mobile, webhook)
+// Có thể ghi đè qua biến môi trường CORS_ORIGINS (vd: "https://a.com,https://b.com")
+const allowedOrigins = (process.env.CORS_ORIGINS || 'https://pencillaw.com,https://www.pencillaw.com,https://api.pencillaw.com')
+  .split(',').map((o) => o.trim()).filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    // Không có Origin (curl, app mobile, webhook SePay...) => cho phép
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(null, false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
+  maxAge: 86400
+}));
+
+// Security headers chung cho API
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 

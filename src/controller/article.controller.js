@@ -1,5 +1,6 @@
 const { aiSearch } = require('../services/aiSearch.service');
 const articleServices = require('../services/article.services');
+const sanitizeError = require('../utils/sanitizeError');
 
 const createArticleController = async (req, res) => {
     try {
@@ -14,7 +15,7 @@ const createArticleController = async (req, res) => {
         });
     } catch (error) {
         console.log("createArticleController error: ", error);
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -25,7 +26,7 @@ const getArticlesController = async (req, res) => {
         res.status(200).json({ success: true, data: result });
     } catch (error) {
         console.log("getArticlesController error: ", error);
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -35,7 +36,7 @@ const getArticleDetailController = async (req, res) => {
         res.status(200).json({ success: true, data: article });
     } catch (error) {
         console.log("getArticleDetailController error: ", error);
-        res.status(404).json({ success: false, message: error.message });
+        res.status(404).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -45,7 +46,7 @@ const getArticleBySlugController = async (req, res) => {
         res.status(200).json({ success: true, data: article });
     } catch (error) {
         console.log("getArticleBySlugController error: ", error);
-        res.status(404).json({ success: false, message: error.message });
+        res.status(404).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -55,7 +56,7 @@ const getArticleByLawyerController = async (req, res) => {
         res.status(200).json({ success: true, data: articles });
     } catch (error) {
         console.log("getArticleByLawyerController error: ", error);
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -69,7 +70,7 @@ const updateArticleController = async (req, res) => {
         });
     } catch (error) {
         console.log("updateArticleController error: ", error);
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -79,7 +80,7 @@ const deleteArticleController = async (req, res) => {
         res.status(200).json({ success: true, message: result.message });
     } catch (error) {
         console.log("deleteArticleController error: ", error);
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -99,7 +100,7 @@ const aiSearchController = async (req, res) => {
         res.status(200).json({ success: true, data: result });
     } catch (error) {
         console.log("aiSearchController error: ", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -124,7 +125,7 @@ const trackArticleDownloadController = async (req, res) => {
         res.status(200).json({ success: true, data: article });
     } catch (error) {
         console.log("trackArticleDownloadController error: ", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 

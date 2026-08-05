@@ -1,4 +1,5 @@
 const { generateFormContent, buildDocxFromContent, COMMON_FORM_TYPES, getAiGenerationHistory } = require('../services/legalAiChat.service');
+const sanitizeError = require('../utils/sanitizeError');
 
 /**
  * GET /legal/ai-chat/form-types
@@ -52,7 +53,7 @@ const legalAiChatController = async (req, res) => {
             });
         }
 
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -103,7 +104,7 @@ const downloadLegalFormController = async (req, res) => {
             });
         }
 
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 
@@ -117,7 +118,7 @@ const getAiHistoryController = async (req, res) => {
         res.status(200).json({ success: true, data: history });
     } catch (error) {
         console.error('getAiHistoryController error:', error.message);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: sanitizeError(error) });
     }
 };
 

@@ -6,6 +6,7 @@ const { graphSearch } = require('./graphSearch.service');
 const NodeCache = require('node-cache');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const sanitizeError = require('../utils/sanitizeError');
 require('dotenv').config();
 
 // Cấu hình axios với timeout
@@ -511,7 +512,7 @@ ${historyContext}
 
     } catch (error) {
         console.error('AI Search Error:', error.message);
-        throw new Error('Lỗi trong quá trình AI xử lý câu hỏi: ' + error.message);
+        throw new Error('Lỗi trong quá trình AI xử lý câu hỏi: ' + sanitizeError(error));
     }
 };
 

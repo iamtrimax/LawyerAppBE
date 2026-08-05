@@ -2,35 +2,49 @@ const CallLog = require('../model/callLog.model');
 const Lawyer = require('../model/lawyer.model');
 const User = require('../model/user.model');
 
+// Ép kiểu an toàn: chặn NoSQL injection khi client gửi object qua body/query
+const toStr = (value) => (typeof value === 'string' ? value : '');
+
 /**
  * Tạo mới một bản ghi cuộc gọi
  */
 const createCallLog = async ({ callerId, receiverId, type, status, startTime }) => {
+    const safeType = toStr(type) || 'audio';
+    const safeStatus = toStr(status) || 'missed';
+    const safeStartTime = startTime instanceof Date ? startTime : new Date(toStr(startTime) || Date.now());
     return await CallLog.create({
         callerId,
         receiverId,
-        type: type || 'audio',
-        status: status || 'missed',
-        startTime: startTime || new Date()
+        type: safeType,
+        status: safeStatus,
+        startTime: isNaN(safeStartTime.getTime()) ? new Date() : safeStartTime
     });
 };
 
 /**
  * Cập nhật một bản ghi cuộc gọi theo ID
  */
+const applyCallLogUpdate = (callLog, updateData) => {
+    if (updateData.status) callLog.status = toStr(updateData.status);
+    if (updateData.startTime) callLog.startTime = new Date(toStr(updateData.startTime));
+    if (updateData.endTime) {
+        const end = new Date(toStr(updateData.endTime));
+        callLog.endTime = isNaN(end.getTime()) ? new Date() : end;
+        const start = callLog.startTime || callLog.createdAt;
+        const diffMs = callLog.endTime.getTime() - new Date(start).getTime();
+        callLog.duration = Math.max(0, Math.round(diffMs / 1000));
+    }
+    if (updateData.duration !== undefined) {
+        const duration = Number(updateData.duration);
+        callLog.duration = Number.isFinite(duration) && duration >= 0 ? Math.round(duration) : 0;
+    }
+};
+
 const updateCallLog = async (logId, updateData) => {
     const callLog = await CallLog.findById(logId);
     if (!callLog) return null;
 
-    if (updateData.status) callLog.status = updateData.status;
-    if (updateData.startTime) callLog.startTime = updateData.startTime;
-    if (updateData.endTime) {
-        callLog.endTime = updateData.endTime;
-        const start = callLog.startTime || callLog.createdAt;
-        const diffMs = new Date(updateData.endTime).getTime() - new Date(start).getTime();
-        callLog.duration = Math.max(0, Math.round(diffMs / 1000));
-    }
-    if (updateData.duration !== undefined) callLog.duration = updateData.duration;
+    applyCallLogUpdate(callLog, updateData);
 
     await callLog.save();
     return callLog;
@@ -50,15 +64,7 @@ const updateLatestCallLog = async (callerId, receiverId, updateData) => {
 
     if (!callLog) return null;
 
-    if (updateData.status) callLog.status = updateData.status;
-    if (updateData.startTime) callLog.startTime = updateData.startTime;
-    if (updateData.endTime) {
-        callLog.endTime = updateData.endTime;
-        const start = callLog.startTime || callLog.createdAt;
-        const diffMs = new Date(updateData.endTime).getTime() - new Date(start).getTime();
-        callLog.duration = Math.max(0, Math.round(diffMs / 1000));
-    }
-    if (updateData.duration !== undefined) callLog.duration = updateData.duration;
+    applyCallLogUpdate(callLog, updateData);
 
     await callLog.save();
     return callLog;
