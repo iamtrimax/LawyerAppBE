@@ -703,11 +703,16 @@ const googleLogin = async (googleData) => {
 
     // Nếu frontend yêu cầu đăng nhập với role cụ thể
     if (role) {
-      if (role === "lawyer" && user.role !== "lawyer") {
-        throw new Error("Tài khoản của bạn không phải là tài khoản Luật sư.");
-      }
-      if (role !== "lawyer" && user.role === "lawyer") {
-        throw new Error("Email này đã được đăng ký tài khoản Luật sư. Vui lòng đăng nhập bằng cổng Luật sư.");
+      if (role !== user.role) {
+        if (role === "lawyer") {
+          throw new Error("Tài khoản của bạn không phải là tài khoản Luật sư.");
+        } else if (role === "member") {
+          throw new Error("Tài khoản của bạn không phải là tài khoản Thành viên.");
+        } else if (role === "customer") {
+          throw new Error("Tài khoản của bạn không phải là tài khoản Khách hàng.");
+        } else {
+          throw new Error("Vai trò không hợp lệ.");
+        }
       }
     } else {
       // Logic cũ (tương thích ngược nếu không truyền role)
