@@ -678,7 +678,7 @@ const getReferralHistory = async (userId) => {
 };
 
 const googleLogin = async (googleData) => {
-  const { email, fullname, googleId, avatar } = googleData;
+  const { email, fullname, googleId, avatar, role } = googleData;
 
   // Ép kiểu chuỗi để chặn NoSQL injection / lỗi crash khi email là object
   const normalizedEmail = toEmail(email);
@@ -695,19 +695,29 @@ const googleLogin = async (googleData) => {
 
   if (user) {
     // 2. Kiểm tra role của tài khoản đã tồn tại
-    if (user.role === "lawyer") {
-      throw new Error(
-        "Email này đã được đăng ký tài khoản Luật sư trong hệ thống. Vui lòng đăng nhập bằng cổng Luật sư hoặc sử dụng email khác."
-      );
-    }
-
     if (user.role === "admin") {
       throw new Error(
-        "Email này là tài khoản Quản trị viên. Không thể đăng nhập qua cổng Khách hàng."
+        "Email này là tài khoản Quản trị viên. Không thể đăng nhập qua ứng dụng."
       );
     }
 
-    // Nếu user thuộc role customer hoặc member
+    // Nếu frontend yêu cầu đăng nhập với role cụ thể
+    if (role) {
+      if (role === "lawyer" && user.role !== "lawyer") {
+        throw new Error("Tài khoản của bạn không phải là tài khoản Luật sư.");
+      }
+      if (role !== "lawyer" && user.role === "lawyer") {
+        throw new Error("Email này đã được đăng ký tài khoản Luật sư. Vui lòng đăng nhập bằng cổng Luật sư.");
+      }
+    } else {
+      // Logic cũ (tương thích ngược nếu không truyền role)
+      if (user.role === "lawyer") {
+        throw new Error(
+          "Email này đã được đăng ký tài khoản Luật sư. Vui lòng đăng nhập bằng cổng Luật sư."
+        );
+      }
+    }
+
     if (user.isActived === false) {
       const error = new Error("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.");
       error.statusCode = 403;
@@ -727,21 +737,11 @@ const googleLogin = async (googleData) => {
       user.avatar = avatar;
     }
   } else {
-    // 3. Nếu chưa tồn tại -> Tạo tài khoản Customer mới
-    const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10);
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(randomPassword, salt);
-
-    user = await userModel.create({
-      email: normalizedEmail,
-      fullname: safeFullname || normalizedEmail.split("@")[0],
-      password: hashedPassword,
-      role: "customer",
-      isVerified: true,
-      isActived: true,
-      googleId: safeGoogleId || "",
-      avatar: safeAvatar || ""
-    });
+    // 3. Nếu chưa tồn tại -> Báo cho Frontend biết để chuyển sang màn hình Đăng ký
+    const error = new Error("Tài khoản chưa tồn tại trong hệ thống.");
+    error.isNewUser = true;
+    error.statusCode = 404;
+    throw error;
   }
 
   // 4. Tạo JWT Token

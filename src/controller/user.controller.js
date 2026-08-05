@@ -376,14 +376,14 @@ const getReferralHistoryController = async (req, res) => {
 
 
 const googleLoginController = async (req, res) => {
-  const { email, fullname, googleId, avatar } = req.body;
+  const { email, fullname, googleId, avatar, role } = req.body;
 
   if (!email) {
     return res.status(400).json({ success: false, message: "Email là bắt buộc" });
   }
 
   try {
-    const result = await googleLogin({ email, fullname, googleId, avatar });
+    const result = await googleLogin({ email, fullname, googleId, avatar, role });
     res.status(200).json({
       success: true,
       message: "Đăng nhập bằng Google thành công",
@@ -395,7 +395,8 @@ const googleLoginController = async (req, res) => {
     const statusCode = error.statusCode || 400;
     return res.status(statusCode).json({
       success: false,
-      message: sanitizeError(error)
+      message: sanitizeError(error),
+      isNewUser: error.isNewUser || false
     });
   }
 };
