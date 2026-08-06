@@ -27,7 +27,7 @@ app.disable('x-powered-by');
 
 // CORS: chỉ cho phép origin của chính dự án + request không có Origin (app mobile, webhook)
 // Có thể ghi đè qua biến môi trường CORS_ORIGINS (vd: "https://a.com,https://b.com")
-const allowedOrigins = (process.env.CORS_ORIGINS || 'https://pencillaw.com,https://www.pencillaw.com,https://api.pencillaw.com')
+const allowedOrigins = (process.env.CORS_ORIGINS || 'https://pencillaw.com,https://www.pencillaw.com,https://api.pencillaw.com,https://admin.pencillaw.com')
   .split(',').map((o) => o.trim()).filter(Boolean);
 
 app.use(cors({
