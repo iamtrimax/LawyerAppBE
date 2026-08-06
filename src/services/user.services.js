@@ -703,6 +703,7 @@ const googleLogin = async (googleData) => {
 
     // Nếu frontend yêu cầu đăng nhập với role cụ thể
     if (role) {
+      console.log(`[Google Login] Requested role: ${role}, User role in DB: ${user.role}`);
       if (role !== user.role) {
         if (role === "lawyer") {
           throw new Error("Tài khoản của bạn không phải là tài khoản Luật sư.");
@@ -716,6 +717,7 @@ const googleLogin = async (googleData) => {
       }
     } else {
       // Logic cũ (tương thích ngược nếu không truyền role)
+      console.log(`[Google Login] No role provided by frontend, User role in DB: ${user.role}`);
       if (user.role === "lawyer") {
         throw new Error(
           "Email này đã được đăng ký tài khoản Luật sư. Vui lòng đăng nhập bằng cổng Luật sư."
@@ -743,6 +745,16 @@ const googleLogin = async (googleData) => {
     }
   } else {
     // 3. Nếu chưa tồn tại -> Báo cho Frontend biết để chuyển sang màn hình Đăng ký
+    if (role === "lawyer") {
+      return {
+        isNewUser: true,
+        email: normalizedEmail,
+        fullname: safeFullname,
+        googleId: safeGoogleId,
+        avatar: safeAvatar,
+        role: role
+      };
+    }
     const error = new Error("Tài khoản chưa tồn tại trong hệ thống.");
     error.isNewUser = true;
     error.statusCode = 404;
@@ -756,15 +768,31 @@ const googleLogin = async (googleData) => {
   user.refreshTokens = refreshToken;
   await user.save();
 
-  const userRes = user.toObject();
-  delete userRes.password;
-  delete userRes.refreshTokens;
-  delete userRes.otp;
+  const userObj = user.toObject();
+  delete userObj.password;
+  delete userObj.refreshTokens;
+  delete userObj.otp;
+
+  let userRes = userObj;
+
+  // Nếu là luật sư, cần lấy thêm lawyerProfile để trả về giống userLogin
+  if (user.role === "lawyer") {
+    const lawyerProfile = await lawyerModel.findOne({ userID: user._id });
+    if (lawyerProfile) {
+      const profileObj = lawyerProfile.toObject();
+      userRes = {
+        ...userObj,
+        ...profileObj,
+        profileId: profileObj._id,
+        _id: user._id
+      };
+    }
+  }
 
   return { userRes, accessToken, refreshToken };
 };
 
-  abortBookingPayment = async (bookingId, userId) => {
+  const abortBookingPayment = async (bookingId, userId) => {
   try {
     const booking = await bookingModel.findOne({ _id: bookingId, userID: userId });
     if (!booking) {

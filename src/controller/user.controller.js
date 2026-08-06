@@ -384,6 +384,22 @@ const googleLoginController = async (req, res) => {
 
   try {
     const result = await googleLogin({ email, fullname, googleId, avatar, role });
+    
+    if (result.isNewUser) {
+      return res.status(200).json({
+        success: true,
+        isNewUser: true,
+        message: "Vui lòng hoàn tất hồ sơ năng lực luật sư",
+        user: { 
+          email: result.email, 
+          fullname: result.fullname, 
+          googleId: result.googleId, 
+          avatar: result.avatar,
+          role: result.role
+        }
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: "Đăng nhập bằng Google thành công",
