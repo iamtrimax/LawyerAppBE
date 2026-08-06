@@ -20,8 +20,11 @@ const lawyerRegister = async (userData) => {
     bankInfo,
     yearsOfExperience,
     titleDegree,
-    operatingProvinces
+    operatingProvinces,
+    googleId
   } = userData;
+
+  const isGoogleSignup = !!googleId;
 
   // 1. Kiểm tra User tồn tại hay chưa
   let user = await userModel.findOne({ email });
@@ -31,7 +34,7 @@ const lawyerRegister = async (userData) => {
     const salt = await bcrypt.genSalt(10);
     hashedPassword = await bcrypt.hash(password, salt);
   }
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = isGoogleSignup ? "" : Math.floor(100000 + Math.random() * 900000).toString();
 
   if (user) {
     if (user.isVerified) {
@@ -50,19 +53,34 @@ const lawyerRegister = async (userData) => {
       user.phone = phone;
       user.otp = otp;
       user.role = "lawyer"; // Đảm bảo role đúng
+      if (isGoogleSignup) {
+        user.googleId = googleId;
+        user.isVerified = true; // Tự động xác thực vì đã qua Google
+      }
       await user.save();
     }
   } else {
     // Nếu chưa có user, tạo mới User trước
-    if (!password) throw new Error("Mật khẩu là bắt buộc cho tài khoản mới");
-    user = await userModel.create({
+    if (!password && !isGoogleSignup) throw new Error("Mật khẩu là bắt buộc cho tài khoản mới");
+    
+    const newUserData = {
       fullname,
       email,
       phone,
-      password: hashedPassword,
       role: "lawyer",
       otp,
-    });
+    };
+    
+    if (hashedPassword) {
+      newUserData.password = hashedPassword;
+    }
+    
+    if (isGoogleSignup) {
+      newUserData.googleId = googleId;
+      newUserData.isVerified = true; // Tự động xác thực vì đã qua Google
+    }
+    
+    user = await userModel.create(newUserData);
   }
 
   // 2. Xử lý phần thông tin Luật sư (Lawyer Model)
@@ -114,7 +132,12 @@ const lawyerRegister = async (userData) => {
     await user.save();
   }
 
-  // 3. Gửi Email
+  // 3. Nếu đăng ký qua Google -> bỏ qua OTP, trả kết quả luôn
+  if (isGoogleSignup) {
+    return { user, isGoogleSignup: true };
+  }
+
+  // 4. Gửi Email OTP cho đăng ký thường
   try {
     await sendEmail(email, "Xác minh tài khoản Luật sư", `Mã OTP của bạn là: ${otp}`);
   } catch (error) {

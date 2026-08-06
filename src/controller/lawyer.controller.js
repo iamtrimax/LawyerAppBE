@@ -35,14 +35,17 @@ const lawyerRegisterController = async (req, res) => {
     bankInfo,
     yearsOfExperience,
     titleDegree,
-    operatingProvinces
+    operatingProvinces,
+    googleId
   } = req.body;
+
+  const isGoogleSignup = !!googleId;
 
   const requiredFields = {
     fullname: "Họ và tên",
     email: "Email",
     phone: "Số điện thoại",
-    ...(role !== "member" && { password: "Mật khẩu" }),
+    ...(!isGoogleSignup && role !== "member" && { password: "Mật khẩu" }),
     lawyerId: "Số thẻ hành nghề",
     specialty: "Chuyên môn",
     firmName: "Văn phòng luật",
@@ -69,7 +72,7 @@ const lawyerRegisterController = async (req, res) => {
   }
 
   try {
-    const newLawyer = await lawyerRegister({
+    const result = await lawyerRegister({
       fullname,
       email,
       phone,
@@ -82,10 +85,31 @@ const lawyerRegisterController = async (req, res) => {
       bankInfo,
       yearsOfExperience,
       titleDegree,
-      operatingProvinces
+      operatingProvinces,
+      googleId
     });
 
-    // Tạo token mới với role đã được cập nhật (quan trọng khi member upgrade lên lawyer)
+    // Nếu đăng ký qua Google -> tạo token và trả về luôn (không cần OTP)
+    if (result.isGoogleSignup) {
+      const newUser = result.user;
+      const newAccessToken = generateToken(newUser, "7d");
+      const newRefreshToken = generateToken(newUser, "14d");
+      newUser.refreshTokens = newRefreshToken;
+      await newUser.save();
+      
+      return res.status(201).json({
+        message: "Đăng ký luật sư qua Google thành công. Vui lòng đợi admin xét duyệt hồ sơ.",
+        userId: newUser._id,
+        success: true,
+        isGoogleSignup: true,
+        user: newUser,
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken
+      });
+    }
+
+    // Đăng ký thường -> cần OTP
+    const newLawyer = result;
     const newAccessToken = generateToken(newLawyer, "7d");
     const newRefreshToken = generateToken(newLawyer, "14d");
 
