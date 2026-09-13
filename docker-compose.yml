@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------
+  # 1. MONGODB MOCK LOCAL
+  # -------------------------------------------------------------
+  mongo-local:
+    image: mongo:latest
+    container_name: mongodb-mock
+    ports:
+      - "27107:27017" # Map ra ngoài để connect bằng Mongo Compass / Seed script
+    volumes:
+      - mongo-data:/data/db
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'     # Cho DB 1 vCPU riêng
+          memory: 1024M   # 1GB RAM cho DB
+
+  # -------------------------------------------------------------
+  # 2. APP SIMULATING AWS EC2 t3.micro
+  # -------------------------------------------------------------
+  my-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app-t3-micro
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://mongo-local:27017/test_db_local
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'     # Mô phỏng đúng 2 vCPU của t3.micro
+          memory: 1024M   # Mô phỏng đúng 1 GiB RAM của t3.micro
+    depends_on:
+      - mongo-local
+
+volumes:
+  mongo-data:

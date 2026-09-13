@@ -10,8 +10,9 @@ const sanitizeError = require("../utils/sanitizeError");
 
 // Ép kiểu an toàn: chặn NoSQL injection khi client gửi object (vd: { $ne: "" })
 // thay cho chuỗi ở các trường email/phone/otp/password...
-const toStr = (value) => (typeof value === 'string' ? value : '');
-const toEmail = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+const toStr = (value) => (typeof value === "string" ? value : "");
+const toEmail = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 const userRegister = async (userData) => {
   const email = toEmail(userData.email);
   const fullname = toStr(userData.fullname).trim();
@@ -67,9 +68,9 @@ const userRegister = async (userData) => {
     password: hashedPassword,
     phone,
     otp,
-    role: role || 'customer',
+    role: role || "customer",
     legalInterest: legalInterest || "",
-    referredBy
+    referredBy,
   });
 
   sendEmail(email, "Xác minh tài khoản", `Mã OTP của bạn là: ${otp}`);
@@ -130,18 +131,25 @@ const userLogin = async (userData) => {
   const role = toStr(userData.role);
 
   if (!identifier || !password || !role) {
-    throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
+    throw new Error(
+      "Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ",
+    );
   }
 
   // 1. Tìm User theo email hoặc phone và role để đảm bảo đăng nhập đúng cổng
   const user = await userModel.findOne({
     $or: [{ email: identifier }, { phone: identifier }],
-    role
+    role,
   });
-  if (!user) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
+  if (!user)
+    throw new Error(
+      "Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ",
+    );
 
   if (user.isActived === false) {
-    const error = new Error("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.");
+    const error = new Error(
+      "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.",
+    );
     error.statusCode = 403;
     throw error;
   }
@@ -149,7 +157,10 @@ const userLogin = async (userData) => {
   // 2. Kiểm tra mật khẩu - thông báo giống hệt trường hợp không tìm thấy user
   // để chống user enumeration qua login
   const isPasswordValid = await bcrypt.compare(password, user.password);
-  if (!isPasswordValid) throw new Error("Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ");
+  if (!isPasswordValid)
+    throw new Error(
+      "Email/Số điện thoại hoặc mật khẩu không đúng hoặc vai trò không hợp lệ",
+    );
 
   // 3. Xử lý riêng cho Lawyer
   if (role === "lawyer") {
@@ -176,11 +187,10 @@ const userLogin = async (userData) => {
       ...userObj,
       ...profileObj,
       profileId: profileObj._id, // Giữ lại profileId cho tính tương thích
-      _id: user._id // Đảm bảo _id là của User
+      _id: user._id, // Đảm bảo _id là của User
     };
 
     return { userRes, accessToken, refreshToken };
-
   } else {
     // 4. Đối với các vai trò khác (customer, member, admin)
     // Đã lọc theo role ở bước findOne nên không cần kiểm tra lại user.role ở đây
@@ -198,21 +208,37 @@ const userLogin = async (userData) => {
 };
 // CHỈ các trường công khai cần hiển thị.
 // TUYỆT ĐỐI không trả refreshTokens, expoPushToken, googleId, referredBy, points...
-const PUBLIC_USER_FIELDS = 'fullname email phone avatar role isVerified isActived';
+const PUBLIC_USER_FIELDS =
+  "fullname email phone avatar role isVerified isActived";
 
 const searchLawyerByCategory = async (query) => {
   const key = `lawyer_search:${JSON.stringify(query)}`;
   const cached = await client.get(key);
-  if (cached) return JSON.parse(cached);
+
+  if (cached) {
+    const cachedLawyers = JSON.parse(cached);
+    return cachedLawyers.filter(
+      (lawyer) => lawyer.userID && lawyer.userID.isActived === true,
+    );
+  }
 
   const lawyers = await lawyerModel
     .find(query)
-    .select('-__v')
-    .populate('userID', PUBLIC_USER_FIELDS)
+    .select("-__v")
+    .populate({
+      path: "userID",
+      select: PUBLIC_USER_FIELDS,
+      match: { isActived: true }, // Chỉ lấy luật sư có user đang hoạt động
+    })
     .lean();
-  await client.set(key, JSON.stringify(lawyers), { EX: 300 });
-  return lawyers;
-}
+
+  const activeLawyers = lawyers.filter(
+    (lawyer) => lawyer.userID && lawyer.userID.isActived === true,
+  );
+
+  await client.set(key, JSON.stringify(activeLawyers), { EX: 300 });
+  return activeLawyers;
+};
 const getLawyerScheduleByLawyerId = async (lawyerId) => {
   const key = `lawyer_schedule_id:${lawyerId}`;
   const cached = await client.get(key);
@@ -221,9 +247,19 @@ const getLawyerScheduleByLawyerId = async (lawyerId) => {
   const schedule = await scheduleModel.findOne({ lawyerID: lawyerId });
   await client.set(key, JSON.stringify(schedule), { EX: 3600 });
   return schedule;
-}
+};
 
-const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentStatus, addressMeeting, documents, actualPhone }) => {
+const createBooking = async ({
+  userId,
+  lawyerId,
+  date,
+  timeSlot,
+  price,
+  paymentStatus,
+  addressMeeting,
+  documents,
+  actualPhone,
+}) => {
   // Ép kiểu an toàn để chặn NoSQL injection (timeSlot dạng object chứa $ne/$regex...)
   date = toStr(date);
   actualPhone = toStr(actualPhone).trim();
@@ -231,16 +267,18 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
 
   // 1. Kiểm tra tính hợp lệ (cơ bản)
   if (!userId || !lawyerId || !date || !timeSlot || !actualPhone) {
-    throw new Error("Thiếu thông tin đặt lịch (Số điện thoại liên hệ là bắt buộc)");
+    throw new Error(
+      "Thiếu thông tin đặt lịch (Số điện thoại liên hệ là bắt buộc)",
+    );
   }
 
   // 2. Validate time slot: phải là object thường với start/end là chuỗi giờ
-  if (typeof timeSlot !== 'object' || Array.isArray(timeSlot)) {
+  if (typeof timeSlot !== "object" || Array.isArray(timeSlot)) {
     throw new Error("Thông tin time slot không hợp lệ");
   }
   const safeSlot = {
     start: toStr(timeSlot.start),
-    end: toStr(timeSlot.end)
+    end: toStr(timeSlot.end),
   };
   if (!safeSlot.start || !safeSlot.end) {
     throw new Error("Thông tin time slot không hợp lệ");
@@ -251,9 +289,9 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
   const existingSlotBooking = await bookingModel.findOne({
     lawyerID: lawyerId,
     date: date,
-    'timeSlot.start': safeSlot.start,
-    'timeSlot.end': safeSlot.end,
-    status: { $ne: 'Cancelled' } // Không tính các booking đã hủy
+    "timeSlot.start": safeSlot.start,
+    "timeSlot.end": safeSlot.end,
+    status: { $ne: "Cancelled" }, // Không tính các booking đã hủy
   });
 
   if (existingSlotBooking) {
@@ -265,11 +303,13 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
     userID: userId,
     lawyerID: lawyerId,
     date: date,
-    status: { $ne: 'Cancelled' }
+    status: { $ne: "Cancelled" },
   });
 
   if (existingUserBookingForDay) {
-    throw new Error("Bạn đã đặt lịch với luật sư này trong ngày hôm nay rồi. Vui lòng chọn ngày khác hoặc luật sư khác.");
+    throw new Error(
+      "Bạn đã đặt lịch với luật sư này trong ngày hôm nay rồi. Vui lòng chọn ngày khác hoặc luật sư khác.",
+    );
   }
 
   try {
@@ -280,17 +320,17 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
       date: date,
       timeSlot: safeSlot,
       price: price || 0,
-      paymentStatus: paymentStatus || 'Unpaid',
-      status: 'Pending',
-      addressMeeting: addressMeeting || '',
+      paymentStatus: paymentStatus || "Unpaid",
+      status: "Pending",
+      addressMeeting: addressMeeting || "",
       documents: documents || [],
-      actualPhone: actualPhone
+      actualPhone: actualPhone,
     });
 
     // Xóa cache danh sách cuộc hẹn của user
     await Promise.all([
       client.del(`user_bookings:${userId}`),
-      client.del("admin_dashboard_stats")
+      client.del("admin_dashboard_stats"),
     ]);
 
     // Gửi email thông báo (Placeholder)
@@ -301,7 +341,9 @@ const createBooking = async ({ userId, lawyerId, date, timeSlot, price, paymentS
     // 5. Xử lý lỗi duplicate key (race condition)
     // Khi 2 request đồng thời vượt qua bước check, database sẽ reject request thứ 2
     if (error.code === 11000) {
-      throw new Error("Slot thời gian này đã được đặt. Vui lòng chọn slot khác.");
+      throw new Error(
+        "Slot thời gian này đã được đặt. Vui lòng chọn slot khác.",
+      );
     }
     throw error;
   }
@@ -313,13 +355,14 @@ const getUserBookings = async (userId) => {
     const cached = await client.get(key);
     if (cached) return JSON.parse(cached);
 
-    const bookings = await bookingModel.find({ userID: userId })
+    const bookings = await bookingModel
+      .find({ userID: userId })
       .populate({
-        path: 'lawyerID',
+        path: "lawyerID",
         populate: {
-          path: 'userID',
-          select: 'fullname email phone'
-        }
+          path: "userID",
+          select: "fullname email phone",
+        },
       })
       .sort({ createdAt: -1 });
 
@@ -327,7 +370,9 @@ const getUserBookings = async (userId) => {
     return bookings;
   } catch (error) {
     // Không nối error.message trực tiếp (có thể chứa nội dung CastError/stack nội bộ)
-    throw new Error("Không thể lấy danh sách cuộc hẹn: " + sanitizeError(error));
+    throw new Error(
+      "Không thể lấy danh sách cuộc hẹn: " + sanitizeError(error),
+    );
   }
 };
 
@@ -346,17 +391,20 @@ const getBookingDetail = async (bookingId, userId) => {
       }
     }
 
-    const booking = await bookingModel.findOne({ _id: bookingId, userID: userId })
+    const booking = await bookingModel
+      .findOne({ _id: bookingId, userID: userId })
       .populate({
-        path: 'lawyerID',
+        path: "lawyerID",
         populate: {
-          path: 'userID',
-          select: 'fullname email phone'
-        }
+          path: "userID",
+          select: "fullname email phone",
+        },
       });
 
     if (!booking) {
-      throw new Error("Không tìm thấy thông tin cuộc hẹn hoặc bạn không có quyền truy cập");
+      throw new Error(
+        "Không tìm thấy thông tin cuộc hẹn hoặc bạn không có quyền truy cập",
+      );
     }
 
     await client.set(key, JSON.stringify(booking), { EX: 3600 }); // Cache trong 1 giờ
@@ -376,11 +424,9 @@ const updateUserProfile = async (userId, updateData) => {
   if (fullname) updateFields.fullname = fullname;
   if (phone) updateFields.phone = phone;
 
-  const updatedUser = await userModel.findByIdAndUpdate(
-    userId,
-    updateFields,
-    { new: true, runValidators: true }
-  ).select('fullname email phone role');
+  const updatedUser = await userModel
+    .findByIdAndUpdate(userId, updateFields, { new: true, runValidators: true })
+    .select("fullname email phone role");
 
   if (!updatedUser) {
     throw new Error("Người dùng không tồn tại");
@@ -388,7 +434,12 @@ const updateUserProfile = async (userId, updateData) => {
   return updatedUser;
 };
 
-const changePassword = async (userId, oldPassword, newPassword, confirmPassword) => {
+const changePassword = async (
+  userId,
+  oldPassword,
+  newPassword,
+  confirmPassword,
+) => {
   if (newPassword !== confirmPassword) {
     throw new Error("Mật khẩu mới và xác nhận mật khẩu không khớp");
   }
@@ -435,7 +486,11 @@ const checkAccountExists = async (email, role) => {
 
   // Gửi email chứa OTP
   try {
-    await sendEmail(email, "Mã OTP đặt lại mật khẩu", `Mã OTP của bạn là: ${otp}. Mã này dùng để xác nhận việc đặt lại mật khẩu.`);
+    await sendEmail(
+      email,
+      "Mã OTP đặt lại mật khẩu",
+      `Mã OTP của bạn là: ${otp}. Mã này dùng để xác nhận việc đặt lại mật khẩu.`,
+    );
   } catch (error) {
     console.error("Lỗi khi gửi email OTP:", error);
   }
@@ -458,7 +513,13 @@ const verifyForgotPasswordOTP = async (email, otp, role) => {
   return true; // Không xóa OTP ở đây để bước Reset dùng tiếp
 };
 
-const resetPassword = async (email, otp, newPassword, confirmPassword, role) => {
+const resetPassword = async (
+  email,
+  otp,
+  newPassword,
+  confirmPassword,
+  role,
+) => {
   // Ép kiểu chuỗi để chặn NoSQL injection
   email = toEmail(email);
   otp = toStr(otp).trim();
@@ -467,7 +528,9 @@ const resetPassword = async (email, otp, newPassword, confirmPassword, role) => 
   role = toStr(role);
 
   if (!email || !otp || !newPassword || !confirmPassword || !role) {
-    throw new Error("Vui lòng cung cấp đầy đủ thông tin (bao gồm mã OTP và vai trò)");
+    throw new Error(
+      "Vui lòng cung cấp đầy đủ thông tin (bao gồm mã OTP và vai trò)",
+    );
   }
 
   if (newPassword !== confirmPassword) {
@@ -500,7 +563,13 @@ const resetPassword = async (email, otp, newPassword, confirmPassword, role) => 
  */
 const refundModel = require("../model/refund.model");
 
-const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', bankName = '') => {
+const cancelBooking = async (
+  bookingId,
+  userId,
+  cancelReason,
+  bankAccount = "",
+  bankName = "",
+) => {
   try {
     // 1. Tìm booking và kiểm tra quyền sở hữu
     const booking = await bookingModel.findById(bookingId);
@@ -513,33 +582,35 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
       throw new Error("Bạn không có quyền huỷ lịch hẹn này");
     }
 
-    if (booking.status === 'Cancelled') {
+    if (booking.status === "Cancelled") {
       throw new Error("Lịch hẹn này đã được huỷ trước đó");
     }
 
-    if (booking.status === 'Completed') {
+    if (booking.status === "Completed") {
       throw new Error("Không thể huỷ lịch hẹn đã hoàn thành");
     }
 
     // 2. Tính số ngày còn lại đến cuộc hẹn
-    const appointmentDate = new Date(`${booking.date}T${booking.timeSlot.start}:00`);
+    const appointmentDate = new Date(
+      `${booking.date}T${booking.timeSlot.start}:00`,
+    );
     const now = new Date();
     const timeDifference = appointmentDate.getTime() - now.getTime();
     const daysUntilAppointment = timeDifference / (1000 * 60 * 60 * 24);
 
     // 3. Xác định phần trăm hoàn tiền theo chính sách
     let refundPercentage = 0;
-    let refundReason = '';
+    let refundReason = "";
 
     if (daysUntilAppointment >= 2) {
       refundPercentage = 100;
-      refundReason = 'Huỷ trước 2 ngày - hoàn 100%';
+      refundReason = "Huỷ trước 2 ngày - hoàn 100%";
     } else if (daysUntilAppointment >= 1) {
       refundPercentage = 50;
-      refundReason = 'Huỷ trước 1 ngày - hoàn 50%';
+      refundReason = "Huỷ trước 1 ngày - hoàn 50%";
     } else {
       refundPercentage = 0;
-      refundReason = 'Huỷ muộn - không hoàn tiền';
+      refundReason = "Huỷ muộn - không hoàn tiền";
     }
 
     // 4. Tính số tiền hoàn lại
@@ -553,7 +624,8 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
     if (!finalBankAccount && booking.paymentInfo) {
       // Ưu tiên lấy từ trường đã lưu (nếu SePay có phân tích sẵn)
       finalBankAccount = booking.paymentInfo.senderAccount;
-      finalBankName = booking.paymentInfo.senderName || booking.paymentInfo.gateway;
+      finalBankName =
+        booking.paymentInfo.senderName || booking.paymentInfo.gateway;
 
       // Fallback: Nếu không có senderAccount, thử tìm trong description bằng Regex
       if (!finalBankAccount && booking.paymentInfo.description) {
@@ -562,21 +634,27 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
 
         if (matches) {
           // Lấy số tài khoản nhận tiền (của mình) để so sánh
-          const merchantAccount = booking.paymentInfo.fullWebhookData?.accountNumber;
+          const merchantAccount =
+            booking.paymentInfo.fullWebhookData?.accountNumber;
 
           // Tìm số tài khoản nào KHÁC với số tài khoản của merchant
-          const possibleSenderAcc = matches.find(acc => acc !== merchantAccount);
+          const possibleSenderAcc = matches.find(
+            (acc) => acc !== merchantAccount,
+          );
 
           if (possibleSenderAcc) {
             finalBankAccount = possibleSenderAcc;
-            console.log("Extracted potential sender account:", finalBankAccount);
+            console.log(
+              "Extracted potential sender account:",
+              finalBankAccount,
+            );
           }
         }
       }
     }
 
     // 6. Cập nhật trạng thái booking
-    booking.status = 'Cancelled';
+    booking.status = "Cancelled";
     booking.cancelReason = cancelReason;
 
     // Do NOT change paymentStatus to Refunded immediately.
@@ -586,7 +664,7 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
 
     // 7. Tạo refund record nếu có hoàn tiền (và đã thanh toán)
     let refundRecord = null;
-    if (booking.paymentStatus === 'Paid' && refundAmount > 0) {
+    if (booking.paymentStatus === "Paid" && refundAmount > 0) {
       refundRecord = await refundModel.create({
         bookingID: bookingId,
         userID: userId,
@@ -596,7 +674,7 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
         refundReason: refundReason,
         bankAccount: finalBankAccount,
         bankName: finalBankName,
-        status: 'Pending'
+        status: "Pending",
       });
     }
 
@@ -606,7 +684,7 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
       client.del(`booking_detail:${bookingId}`),
       client.del(`lawyer_bookings:${booking.lawyerID}`),
       client.del(`lawyer_booking_detail:${bookingId}`),
-      client.del("admin_dashboard_stats")
+      client.del("admin_dashboard_stats"),
     ]);
 
     return {
@@ -616,8 +694,8 @@ const cancelBooking = async (bookingId, userId, cancelReason, bankAccount = '', 
         refundAmount,
         refundPercentage,
         refundReason,
-        refundRecord: refundRecord ? refundRecord._id : null
-      }
+        refundRecord: refundRecord ? refundRecord._id : null,
+      },
     };
   } catch (error) {
     throw new Error("Không thể huỷ lịch hẹn: " + sanitizeError(error));
@@ -628,17 +706,17 @@ const updateUserRank = async (userId) => {
   const user = await userModel.findById(userId);
   if (!user) return;
 
-  let newRank = 'Bạc';
+  let newRank = "Bạc";
   const points = user.points;
 
   if (points >= 20000) {
-    newRank = 'Kim cương';
+    newRank = "Kim cương";
   } else if (points >= 5000) {
-    newRank = 'Bạch kim';
+    newRank = "Bạch kim";
   } else if (points >= 1000) {
-    newRank = 'Vàng';
+    newRank = "Vàng";
   } else {
-    newRank = 'Bạc';
+    newRank = "Bạc";
   }
 
   if (user.rank !== newRank) {
@@ -648,7 +726,9 @@ const updateUserRank = async (userId) => {
 };
 
 const getUserProfile = async (userId) => {
-  const user = await userModel.findById(userId).select('-password -otp -refreshTokens');
+  const user = await userModel
+    .findById(userId)
+    .select("-password -otp -refreshTokens");
   if (!user) {
     throw new Error("Người dùng không tồn tại");
   }
@@ -662,7 +742,7 @@ const getUserProfile = async (userId) => {
         ...userObj,
         ...profileObj,
         profileId: profileObj._id,
-        _id: user._id
+        _id: user._id,
       };
     }
   }
@@ -672,8 +752,9 @@ const getUserProfile = async (userId) => {
 
 const getReferralHistory = async (userId) => {
   // Tìm tất cả người dùng được giới thiệu bởi userId và đã xác thực
-  const referrals = await userModel.find({ referredBy: userId, isVerified: true })
-    .select('fullname email createdAt phone rank');
+  const referrals = await userModel
+    .find({ referredBy: userId, isVerified: true })
+    .select("fullname email createdAt phone rank");
   return referrals;
 };
 
@@ -697,36 +778,46 @@ const googleLogin = async (googleData) => {
     // 2. Kiểm tra role của tài khoản đã tồn tại
     if (user.role === "admin") {
       throw new Error(
-        "Email này là tài khoản Quản trị viên. Không thể đăng nhập qua ứng dụng."
+        "Email này là tài khoản Quản trị viên. Không thể đăng nhập qua ứng dụng.",
       );
     }
 
     // Nếu frontend yêu cầu đăng nhập với role cụ thể
     if (role) {
-      console.log(`[Google Login] Requested role: ${role}, User role in DB: ${user.role}`);
+      console.log(
+        `[Google Login] Requested role: ${role}, User role in DB: ${user.role}`,
+      );
       if (role !== user.role) {
         if (role === "lawyer") {
           throw new Error("Tài khoản của bạn không phải là tài khoản Luật sư.");
         } else if (role === "member") {
-          throw new Error("Tài khoản của bạn không phải là tài khoản Thành viên.");
+          throw new Error(
+            "Tài khoản của bạn không phải là tài khoản Thành viên.",
+          );
         } else if (role === "customer") {
-          throw new Error("Tài khoản của bạn không phải là tài khoản Khách hàng.");
+          throw new Error(
+            "Tài khoản của bạn không phải là tài khoản Khách hàng.",
+          );
         } else {
           throw new Error("Vai trò không hợp lệ.");
         }
       }
     } else {
       // Logic cũ (tương thích ngược nếu không truyền role)
-      console.log(`[Google Login] No role provided by frontend, User role in DB: ${user.role}`);
+      console.log(
+        `[Google Login] No role provided by frontend, User role in DB: ${user.role}`,
+      );
       if (user.role === "lawyer") {
         throw new Error(
-          "Email này đã được đăng ký tài khoản Luật sư. Vui lòng đăng nhập bằng cổng Luật sư."
+          "Email này đã được đăng ký tài khoản Luật sư. Vui lòng đăng nhập bằng cổng Luật sư.",
         );
       }
     }
 
     if (user.isActived === false) {
-      const error = new Error("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.");
+      const error = new Error(
+        "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.",
+      );
       error.statusCode = 403;
       throw error;
     }
@@ -752,7 +843,7 @@ const googleLogin = async (googleData) => {
         fullname: safeFullname,
         googleId: safeGoogleId,
         avatar: safeAvatar,
-        role: role
+        role: role,
       };
     }
     const error = new Error("Tài khoản chưa tồn tại trong hệ thống.");
@@ -784,7 +875,7 @@ const googleLogin = async (googleData) => {
         ...userObj,
         ...profileObj,
         profileId: profileObj._id,
-        _id: user._id
+        _id: user._id,
       };
     }
   }
@@ -792,25 +883,30 @@ const googleLogin = async (googleData) => {
   return { userRes, accessToken, refreshToken };
 };
 
-  const abortBookingPayment = async (bookingId, userId) => {
+const abortBookingPayment = async (bookingId, userId) => {
   try {
-    const booking = await bookingModel.findOne({ _id: bookingId, userID: userId });
+    const booking = await bookingModel.findOne({
+      _id: bookingId,
+      userID: userId,
+    });
     if (!booking) {
       throw new Error("Không tìm thấy lịch hẹn");
     }
 
-    if (booking.status === 'Pending' && booking.paymentStatus === 'Unpaid') {
+    if (booking.status === "Pending" && booking.paymentStatus === "Unpaid") {
       await bookingModel.findByIdAndDelete(bookingId);
       await Promise.all([
         client.del(`user_bookings:${userId}`),
         client.del(`booking_detail:${bookingId}`),
         client.del(`lawyer_bookings:${booking.lawyerID}`),
         client.del(`lawyer_booking_detail:${bookingId}`),
-        client.del("admin_dashboard_stats")
+        client.del("admin_dashboard_stats"),
       ]);
       return true;
     } else {
-      throw new Error("Không thể huỷ: Lịch hẹn đã được thanh toán hoặc xác nhận");
+      throw new Error(
+        "Không thể huỷ: Lịch hẹn đã được thanh toán hoặc xác nhận",
+      );
     }
   } catch (error) {
     throw new Error("Không thể huỷ lịch hẹn: " + sanitizeError(error));
@@ -836,5 +932,5 @@ module.exports = {
   abortBookingPayment,
   updateUserRank,
   getUserProfile,
-  getReferralHistory
+  getReferralHistory,
 };

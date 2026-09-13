@@ -65,7 +65,7 @@ const {
 const router = express.Router();
 
 // 1. Định nghĩa các mức Rate Limit khác nhau
-const globalLimiter = rateLimiter({ prefix: "global", max: 100 });
+const globalLimiter = rateLimiter({ prefix: "global", max: 10000 });
 const authLimiter = rateLimiter({ prefix: "auth", max: 5, windowMs: 60000 * 5 }); // 5 lần/5 phút cho login/register/forgot-password
 const paymentLimiter = rateLimiter({ prefix: "payment", max: 3, windowMs: 60000 }); // 3 lần/phút cho tạo link thanh toán
 
