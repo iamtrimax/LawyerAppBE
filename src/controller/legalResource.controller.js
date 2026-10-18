@@ -18,6 +18,17 @@ const getResourcesController = async (req, res) => {
     }
 };
 
+const getResourceBySlugController = async (req, res) => {
+    try {
+        const resource = await legalResourceServices.getResourceBySlug(req.params.slug);
+        if (!resource) return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu' });
+        res.status(200).json({ success: true, data: resource });
+    } catch (error) {
+        console.error('getResourceBySlugController error:', error);
+        res.status(500).json({ success: false, message: sanitizeError(error) });
+    }
+};
+
 const getResourceDetailController = async (req, res) => {
     try {
         const { id } = req.params;
@@ -73,6 +84,7 @@ const deleteResourceController = async (req, res) => {
 module.exports = {
     getResourcesController,
     getResourceDetailController,
+    getResourceBySlugController,
     searchResourcesController,
     createResourceController,
     updateResourceController,

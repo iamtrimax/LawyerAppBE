@@ -261,6 +261,9 @@ const confirmBookingPayment = async (lawyerId, bookingId) => {
 const updateLawyerProfile = async (userId, lawyerId, updateData) => {
   const { fullname, phone, avatar, specialty, firmName, bankInfo, lawyerCardImage, yearsOfExperience, titleDegree, operatingProvinces } = updateData;
 
+  if (updateData.introduction !== undefined && (typeof updateData.introduction !== 'string' || updateData.introduction.length > 5000)) {
+    throw new Error('Phần giới thiệu phải là văn bản tối đa 5000 ký tự.');
+  }
   // 1. Cập nhật bảng User
   if (fullname || phone) {
     await userModel.findByIdAndUpdate(userId, {
@@ -271,6 +274,7 @@ const updateLawyerProfile = async (userId, lawyerId, updateData) => {
 
   // 2. Cập nhật bảng Lawyer
   const lawyerUpdate = {};
+  if (updateData.introduction !== undefined) lawyerUpdate.introduction = updateData.introduction.trim();
   if (avatar) lawyerUpdate.avatar = avatar;
   if (specialty) {
     lawyerUpdate.specialty = Array.isArray(specialty) ? specialty : [specialty];

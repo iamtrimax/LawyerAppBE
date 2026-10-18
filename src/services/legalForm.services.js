@@ -1,5 +1,6 @@
 const legalFormModel = require("../model/legalForm.model");
 const client = require("../config/redis");
+const { withLegalFormSlug } = require("../utils/legalFormSlug");
 
 // Ép kiểu chuỗi an toàn: chặn NoSQL injection khi client gửi object qua query params
 const toStr = (value) => (typeof value === 'string' ? value : '');
@@ -17,7 +18,10 @@ const getForms = async ({ category, page = 1, limit = 10, search }) => {
 
     const cacheKey = `legal_forms:${category || 'all'}:${page}:${limit}:${search || 'none'}`;
     const cached = await client.get(cacheKey);
-    if (cached) return JSON.parse(cached);
+    if (cached) {
+        const result = JSON.parse(cached);
+        return { ...result, data: result.data.map(withLegalFormSlug) };
+    }
 
     const [data, total] = await Promise.all([
         legalFormModel.find(query)
@@ -37,7 +41,7 @@ const getForms = async ({ category, page = 1, limit = 10, search }) => {
     ]);
 
     const result = {
-        data,
+        data: data.map(withLegalFormSlug),
         pagination: {
             total,
             page,
@@ -54,7 +58,7 @@ const getForms = async ({ category, page = 1, limit = 10, search }) => {
  * Lấy chi tiết văn bản mẫu
  */
 const getFormDetail = async (id) => {
-    return await legalFormModel.findById(id)
+    const form = await legalFormModel.findById(id)
         .populate({
             path: 'lawyerID',
             populate: {
@@ -64,6 +68,31 @@ const getFormDetail = async (id) => {
             select: 'userID avatar'
         })
         .lean();
+    return ensureFormSlug(form);
+};
+
+// Fill old records lazily so existing forms need no manual migration.
+const ensureFormSlug = async (form) => {
+    if (!form || form.slug) return form;
+    const result = withLegalFormSlug(form);
+    await legalFormModel.updateOne(
+        { _id: form._id, $or: [{ slug: { $exists: false } }, { slug: null }, { slug: '' }] },
+        { $set: { slug: result.slug } },
+        { overwriteImmutable: true }
+    );
+    return result;
+};
+
+const getFormBySlug = async (slug) => {
+    if (typeof slug !== 'string' || !/^[a-z0-9-]+$/.test(slug)) return null;
+    const existing = await legalFormModel.findOne({ slug }).select('_id').lean();
+    if (existing) return getFormDetail(existing._id);
+
+    // A cached list can share a form before its slug has been saved.
+    const id = slug.match(/-([a-f0-9]{24})$/)?.[1];
+    if (!id) return null;
+    const form = await getFormDetail(id);
+    return form?.slug === slug ? form : null;
 };
 
 /**
@@ -77,7 +106,9 @@ const incrementDownload = async (id) => {
  * Admin: Thêm văn bản mẫu mới
  */
 const createForm = async (data) => {
-    const form = await legalFormModel.create(data);
+    const formData = { ...data };
+    delete formData.slug;
+    const form = await legalFormModel.create(formData);
     await invalidateFormCache(data.category);
     return form;
 };
@@ -86,8 +117,15 @@ const createForm = async (data) => {
  * Admin: Cập nhật văn bản mẫu
  */
 const updateForm = async (id, data) => {
-    const form = await legalFormModel.findByIdAndUpdate(id, data, { new: true });
+    const form = await legalFormModel.findById(id);
     if (form) {
+        const formData = { ...data };
+        delete formData.slug;
+        if (!form.slug) {
+            form.set('slug', withLegalFormSlug(form.toObject()).slug, undefined, { overwriteImmutable: true });
+        }
+        Object.assign(form, formData);
+        await form.save();
         await invalidateFormCache(form.category);
     }
     return form;
@@ -108,7 +146,8 @@ const deleteForm = async (id) => {
  * Lawyer: Lấy danh sách văn bản mẫu của tôi
  */
 const getLawyerForms = async (lawyerID) => {
-    return await legalFormModel.find({ lawyerID }).sort({ createdAt: -1 }).lean();
+    const forms = await legalFormModel.find({ lawyerID }).sort({ createdAt: -1 }).lean();
+    return forms.map(withLegalFormSlug);
 };
 
 /**
@@ -118,7 +157,12 @@ const updateLawyerForm = async (id, data, lawyerID) => {
     const form = await legalFormModel.findOne({ _id: id, lawyerID });
     if (!form) throw new Error("Không tìm thấy văn bản mẫu hoặc bạn không có quyền chỉnh sửa");
 
-    Object.assign(form, data);
+    const formData = { ...data };
+    delete formData.slug;
+    if (!form.slug) {
+        form.set('slug', withLegalFormSlug(form.toObject()).slug, undefined, { overwriteImmutable: true });
+    }
+    Object.assign(form, formData);
     await form.save();
 
     await invalidateFormCache(form.category);
@@ -153,14 +197,16 @@ const invalidateFormCache = async (category) => {
 const searchForms = async (textQuery) => {
     textQuery = toStr(textQuery);
     if (!textQuery.trim()) return [];
-    return await legalFormModel.find({
+    const forms = await legalFormModel.find({
         $text: { $search: textQuery }
     }).sort({ score: { $meta: "textScore" } }).limit(20).lean();
+    return forms.map(withLegalFormSlug);
 };
 
 module.exports = {
     getForms,
     getFormDetail,
+    getFormBySlug,
     incrementDownload,
     createForm,
     updateForm,

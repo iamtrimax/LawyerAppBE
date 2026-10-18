@@ -4,6 +4,8 @@ const lawyerSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
   },
+  slug: { type: String, unique: true, sparse: true, immutable: true },
+  introduction: { type: String, trim: true, maxlength: 5000, default: '' },
   avatar: {
     type: String,
     required: true,

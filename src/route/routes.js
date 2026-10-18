@@ -1,3 +1,5 @@
+const { getIceServersController } = require('../controller/iceServers.controller');
+const publicData = require('../../middleware/publicDataResponse');
 const express = require("express");
 const { userRegisterController, verifyEmailController, loginController, googleLoginController, updateToken, searchLawyerByCategoryController, getLawyerScheduleByIdController, createBookingController, getUserBookingsController, getBookingDetailController, updateUserProfileController, changePasswordController, checkAccountExistsController, resetPasswordController, verifyForgotPasswordOTPController, cancelBookingController, abortBookingPaymentController, getUserProfileController, getReferralHistoryController } = require("../controller/user.controller");
 const { lawyerRegisterController, getLawyerDetailController, updateScheduleController, getMyScheduleController, getLawyerBookingsController, getLawyerBookingDetailController, confirmBookingPaymentController, updateLawyerProfileController, getLawyersController } = require("../controller/lawyer.controller");
@@ -21,6 +23,7 @@ const {
 const {
     getResourcesController,
     getResourceDetailController,
+    getResourceBySlugController,
     searchResourcesController,
     createResourceController,
     updateResourceController,
@@ -29,6 +32,7 @@ const {
 const {
     getFormsController,
     getFormDetailController,
+    getFormBySlugController,
     trackDownloadController,
     createFormController,
     updateFormController,
@@ -62,6 +66,8 @@ const {
     clearCallLogs
 } = require("../controller/callLog.controller");
 
+const { getPublicLawyerByIdController, getPublicLawyerBySlugController } = require('../controller/lawyerPublic.controller');
+
 const router = express.Router();
 
 // 1. Định nghĩa các mức Rate Limit khác nhau
@@ -75,11 +81,11 @@ router.use(globalLimiter);
 // 3. Định nghĩa các route
 
 // article routes
-router.get("/articles/ai-search", aiSearchController);
-router.get("/articles", getArticlesController);
+router.get("/articles/ai-search", publicData('articleSearch'), aiSearchController);
+router.get("/articles", publicData('articles'), getArticlesController);
 // QUAN TRỌNG: route slug phải đặt TRƯỚC route :id để Express không nhầm 'slug' là ID
-router.get("/articles/slug/:slug", getArticleBySlugController);
-router.get("/articles/:id", getArticleDetailController);
+router.get("/articles/slug/:slug", publicData('article'), getArticleBySlugController);
+router.get("/articles/:id", publicData('article'), getArticleDetailController);
 router.post("/articles/create", verifyAccessToken, verifyLawyer, createArticleController);
 router.get("/articles/lawyer/my-articles", verifyAccessToken, verifyLawyer, getArticleByLawyerController);
 router.put("/articles/update/:id", verifyAccessToken, verifyLawyer, updateArticleController);
@@ -92,7 +98,7 @@ router.post("/verify-email", authLimiter, verifyEmailController);
 router.post("/login", authLimiter, loginController);
 router.post("/google-login", authLimiter, googleLoginController);
 router.post("/update-token", verifyAccessToken, updateToken);
-router.get("/search-lawyer", searchLawyerByCategoryController)
+router.get("/search-lawyer", publicData('lawyerSearch'), searchLawyerByCategoryController)
 router.get("/schedule/:lawyerId", getLawyerScheduleByIdController);
 router.post("/booking/create", verifyAccessToken, createBookingController);
 router.get("/booking/list", verifyAccessToken, getUserBookingsController);
@@ -108,19 +114,23 @@ router.post("/booking/cancel/:bookingId", verifyAccessToken, cancelBookingContro
 router.delete("/booking/abort-payment/:bookingId", verifyAccessToken, abortBookingPaymentController);
 
 // English Legal Data (Feature 3)
-router.get("/legal-resources", getResourcesController);
-router.get("/legal-resources/search", searchResourcesController);
-router.get("/legal-resources/:id", getResourceDetailController);
+router.get("/legal-resources", publicData('resources'), getResourcesController);
+router.get("/legal-resources/search", publicData('resourceSearch'), searchResourcesController);
+router.get("/legal-resources/slug/:slug", publicData('resource'), getResourceBySlugController);
+router.get("/legal-resources/:id", publicData('resource'), getResourceDetailController);
 
 // Legal Forms (Feature 4)
-router.get("/legal-forms", getFormsController);
-router.get("/legal-forms/search", searchFormsController);
-router.get("/legal-forms/:id", getFormDetailController);
+router.get("/legal-forms", publicData('forms'), getFormsController);
+router.get("/legal-forms/search", publicData('formSearch'), searchFormsController);
+router.get("/legal-forms/slug/:slug", publicData('form'), getFormBySlugController);
+router.get("/legal-forms/:id", publicData('form'), getFormDetailController);
 router.get("/legal-forms/view/:id.png", viewFileController);
 router.post("/legal-forms/:id/download", verifyAccessToken, trackDownloadController);
 
 // lawyer routes
-router.get("/lawyers", getLawyersController);
+router.get("/lawyers", publicData('lawyers'), getLawyersController);
+router.get("/lawyers/slug/:slug", publicData('lawyer'), getPublicLawyerBySlugController);
+router.get("/lawyers/profile/:id", publicData('lawyer'), getPublicLawyerByIdController);
 router.post("/lawyer/register", authLimiter, lawyerRegisterController)
 router.post("/lawyer/update-schedule", verifyAccessToken, verifyLawyer, updateScheduleController);
 router.get("/lawyer/detail", verifyAccessToken, verifyLawyer, getLawyerDetailController);
@@ -196,6 +206,9 @@ router.get("/legal/ai-chat/form-types", getFormTypesController);
 router.post("/legal/ai-chat", legalAiChatController);
 router.post("/legal/ai-chat/download", downloadLegalFormController);
 router.get("/legal/ai-chat/history", verifyAccessToken, getAiHistoryController);
+
+// Authenticated access to TURN credentials; the provider API key stays on the server.
+router.get('/calls/ice-servers', verifyAccessToken, rateLimiter({ prefix: 'turn-credentials', max: 30, windowMs: 60000 }), getIceServersController);
 
 // Call Log routes
 router.get("/call-logs", verifyAccessToken, getCallLogs);

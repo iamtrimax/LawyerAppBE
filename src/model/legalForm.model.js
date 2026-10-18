@@ -1,10 +1,17 @@
 const mongoose = require('mongoose');
+const { generateLegalFormSlug } = require('../utils/legalFormSlug');
 
 const legalFormSchema = new mongoose.Schema({
     name: {
         type: String,
         required: true,
         trim: true
+    },
+    slug: {
+        type: String,
+        unique: true,
+        sparse: true,
+        immutable: true
     },
     description: {
         type: String,
@@ -46,6 +53,12 @@ const legalFormSchema = new mongoose.Schema({
         type: String
     }
 }, { timestamps: true });
+
+legalFormSchema.pre('validate', function () {
+    if (!this.slug) {
+        this.set('slug', generateLegalFormSlug(this.name, this._id), undefined, { overwriteImmutable: true });
+    }
+});
 
 // Index for search
 legalFormSchema.index({ name: 'text', description: 'text' });

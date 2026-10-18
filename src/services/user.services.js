@@ -1,3 +1,4 @@
+const { withLawyerSlug } = require('./lawyerPublic.services');
 const lawyerModel = require("../model/lawyer.model");
 const scheduleModel = require("../model/schedule.model");
 const userModel = require("../model/user.model");
@@ -217,9 +218,9 @@ const searchLawyerByCategory = async (query) => {
 
   if (cached) {
     const cachedLawyers = JSON.parse(cached);
-    return cachedLawyers.filter(
+    return (await Promise.all(cachedLawyers.filter(
       (lawyer) => lawyer.userID && lawyer.userID.isActived === true,
-    );
+    ).map(withLawyerSlug))).filter(Boolean);
   }
 
   const lawyers = await lawyerModel
@@ -236,8 +237,9 @@ const searchLawyerByCategory = async (query) => {
     (lawyer) => lawyer.userID && lawyer.userID.isActived === true,
   );
 
-  await client.set(key, JSON.stringify(activeLawyers), { EX: 300 });
-  return activeLawyers;
+  const withSlugs = (await Promise.all(activeLawyers.map(withLawyerSlug))).filter(Boolean);
+  await client.set(key, JSON.stringify(withSlugs), { EX: 300 });
+  return withSlugs;
 };
 const getLawyerScheduleByLawyerId = async (lawyerId) => {
   const key = `lawyer_schedule_id:${lawyerId}`;

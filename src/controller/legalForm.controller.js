@@ -25,6 +25,20 @@ const getFormsController = async (req, res) => {
     }
 };
 
+const getFormBySlugController = async (req, res) => {
+    try {
+        const form = await legalFormServices.getFormBySlug(req.params.slug);
+        if (!form) return res.status(404).json({ success: false, message: "Không tìm thấy biểu mẫu" });
+        if (form.fileUrl && form.fileUrl.startsWith('http')) {
+            form.fileUrl = `${req.protocol}://${req.get('host')}/api/legal-forms/view/${form._id}.png`;
+        }
+        res.status(200).json({ success: true, data: form });
+    } catch (error) {
+        console.error('getFormBySlugController error:', error);
+        res.status(500).json({ success: false, message: sanitizeError(error) });
+    }
+};
+
 const getFormDetailController = async (req, res) => {
     try {
         const { id } = req.params;
@@ -207,6 +221,7 @@ const viewFileController = async (req, res) => {
 module.exports = {
     getFormsController,
     getFormDetailController,
+    getFormBySlugController,
     trackDownloadController,
     createFormController,
     updateFormController,
