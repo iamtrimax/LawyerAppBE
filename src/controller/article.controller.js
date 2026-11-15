@@ -85,13 +85,15 @@ const deleteArticleController = async (req, res) => {
 };
 
 const aiSearchController = async (req, res) => {
+    const startedAt = Date.now();
     try {
-        const { query } = req.query;
+        const { query, history = [] } = req.method === 'POST' ? req.body : req.query;
         if (!query) {
             return res.status(400).json({ success: false, message: "Vui lòng nhập câu hỏi" });
         }
-        const result = await aiSearch(query);
-        console.log("Result: ", result.answer, result.sources);
+        console.log(`[AI Chat HTTP] Bắt đầu xử lý câu hỏi (${String(query).length} ký tự).`);
+        const result = await aiSearch(query, Array.isArray(history) ? history : []);
+        console.log(`[AI Chat HTTP] Hoàn tất trong ${Date.now() - startedAt} ms; ${result.sources.length} nguồn.`);
         // Check if we hit quota (custom message from service)
         if (result.answer.includes("quá tải") || result.answer.includes("giới hạn")) {
             return res.status(429).json({ success: false, data: result });
@@ -99,8 +101,57 @@ const aiSearchController = async (req, res) => {
 
         res.status(200).json({ success: true, data: result });
     } catch (error) {
-        console.log("aiSearchController error: ", error);
+        console.error(`[AI Chat HTTP] Lỗi sau ${Date.now() - startedAt} ms:`, error.message);
         res.status(500).json({ success: false, message: sanitizeError(error) });
+    }
+};
+
+const aiSearchStreamController = async (req, res) => {
+    const startedAt = Date.now();
+    const { query, history = [] } = req.body || {};
+    if (!query) {
+        return res.status(400).json({ success: false, message: 'Vui lòng nhập câu hỏi' });
+    }
+
+    res.status(200);
+    res.set({
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    });
+    res.flushHeaders?.();
+    const abortController = new AbortController();
+    const handleClientDisconnect = () => {
+        if (!res.writableEnded) abortController.abort();
+    };
+    res.on('close', handleClientDisconnect);
+    const heartbeat = setInterval(() => {
+        if (!res.destroyed) res.write(': keep-alive\n\n');
+    }, 15000);
+
+    const sendEvent = (event, data) => {
+        if (!res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    console.log(`[AI Chat HTTP] Bắt đầu stream câu hỏi (${String(query).length} ký tự).`);
+    try {
+        sendEvent('status', { message: 'Đang chuẩn bị tìm tài liệu...' });
+        const result = await aiSearch(query, Array.isArray(history) ? history : [], {
+            signal: abortController.signal,
+            onStatus: (message) => sendEvent('status', { message }),
+            onToken: (token) => sendEvent('token', { token })
+        });
+        sendEvent('sources', { sources: result.sources });
+        sendEvent('done', { elapsedMs: Date.now() - startedAt });
+        console.log(`[AI Chat HTTP] Stream hoàn tất trong ${Date.now() - startedAt} ms; ${result.sources.length} nguồn.`);
+    } catch (error) {
+        console.error(`[AI Chat HTTP] Stream lỗi sau ${Date.now() - startedAt} ms:`, error.message);
+        sendEvent('error', { message: sanitizeError(error) });
+    } finally {
+        clearInterval(heartbeat);
+        res.off('close', handleClientDisconnect);
+        if (!res.destroyed) res.end();
     }
 };
 
@@ -138,5 +189,6 @@ module.exports = {
     updateArticleController,
     deleteArticleController,
     aiSearchController,
+    aiSearchStreamController,
     trackArticleDownloadController
 };

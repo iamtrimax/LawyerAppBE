@@ -1,22 +1,10 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateChatCompletion } = require('./ollama.service');
 const {
     Document, Packer, Paragraph, TextRun, HeadingLevel,
     AlignmentType, BorderStyle, WidthType, TableRow, TableCell, Table
 } = require('docx');
-const legalFormModel = require('../model/legalForm.model');
 const legalAiHistoryModel = require('../model/legalAiHistory.model');
 require('dotenv').config();
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// Danh sách model hỗ trợ Google Search Grounding
-const AVAILABLE_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro", 
-    "gemini-2.0-flash",
-    "gemini-flash-latest",
-    "gemini-pro-latest"
-];
 
 /**
  * Danh sách mẫu đơn phổ biến
@@ -35,20 +23,20 @@ const COMMON_FORM_TYPES = [
 ];
 
 /**
- * Kết hợp Web Search (Grounding) + Multi-Key + Multi-Model Fallback
+ * Sinh nội dung bằng model Ollama được cấu hình trong môi trường
  */
 const generateFormContent = async (userPrompt, userID = null) => {
     const systemPrompt = `
 Bạn là chuyên gia pháp lý Việt Nam. Người dùng yêu cầu tạo một mẫu đơn / tài liệu pháp luật.
 NHIỆM VỤ QUAN TRỌNG: 
-1. Sử dụng công cụ Google Search để tìm kiếm các mẫu đơn/văn bản pháp luật cập nhật mới nhất từ các nguồn uy tín trên mạng (như maudon.vn, thuvienphapluat.vn, luatvietnam.vn).
-2. Dựa trên các mẫu tìm được, hãy sinh ra nội dung mẫu đầy đủ, chuẩn xác theo quy định pháp luật Việt Nam hiện hành.
+1. Không khẳng định đã tra cứu Internet hoặc văn bản mới nhất. Nếu thông tin đầu vào không đủ để xác nhận quy định hiện hành, ghi rõ giới hạn trong notes.
+2. Tạo nội dung mẫu đơn có thể điền được, dựa trên yêu cầu người dùng và kiến thức của bạn.
 
 Trả về dữ liệu JSON CHÍNH XÁC theo format sau:
 {
   "title": "Tiêu đề của mẫu đơn",
   "formType": "Tên loại mẫu đơn",
-  "sourceUrl": "Link nguồn bạn đã tham khảo từ Google Search",
+  "sourceUrl": "",
   "sections": [
     {
       "type": "heading",
@@ -80,68 +68,10 @@ ${userPrompt}
 
 CHỈ trả về JSON thuần túy:`;
 
-    // MULTI-KEY & MULTI-MODEL FALLBACK
-    const API_KEYS = process.env.GEMINI_API_KEY.split(',').map(k => k.trim());
-    let responseText = "";
-    let keyIndex = 0;
-    let modelIndex = 0;
-    let retryCount = 0;
-    const MAX_RETRIES_PER_MODEL = 1;
-
-    while (keyIndex < API_KEYS.length && !responseText) {
-        const currentKey = API_KEYS[keyIndex];
-        const genAIInstance = new GoogleGenerativeAI(currentKey);
-        modelIndex = 0;
-
-        while (modelIndex < AVAILABLE_MODELS.length) {
-            const currentModelName = AVAILABLE_MODELS[modelIndex];
-            const model = genAIInstance.getGenerativeModel({
-                model: currentModelName,
-                tools: [{ googleSearch: {} }]
-            });
-
-            try {
-                console.log(`📝 PencilLaw AI: Key ${keyIndex + 1}/${API_KEYS.length} - Model ${currentModelName}`);
-                const result = await model.generateContent(systemPrompt);
-                const response = await result.response;
-                responseText = response.text().trim();
-                if (responseText) break;
-            } catch (err) {
-                const errorMessage = err.message || "";
-                const isQuotaError = errorMessage.includes('429') ||
-                                     errorMessage.includes('Quota exceeded') ||
-                                     errorMessage.includes('rate limit');
-                const isRetryableError = errorMessage.includes('503') ||
-                                         errorMessage.includes('high demand');
-
-                if (isQuotaError) {
-                    console.warn(`⚠️ PencilLaw AI: Key ${keyIndex + 1} - Model ${currentModelName} hết quota, chuyển model...`);
-                    modelIndex++;
-                    continue;
-                }
-
-                if (isRetryableError && retryCount < MAX_RETRIES_PER_MODEL) {
-                    retryCount++;
-                    console.warn(`🔄 PencilLaw AI: Model ${currentModelName} lỗi tạm thời, thử lại...`);
-                    await new Promise(r => setTimeout(r, 1000));
-                    continue;
-                }
-
-                console.error(`❌ PencilLaw AI: Model ${currentModelName} lỗi: ${errorMessage}`);
-                modelIndex++;
-                retryCount = 0;
-            }
-        }
-
-        if (!responseText) {
-            keyIndex++;
-            console.warn(`🔑 PencilLaw AI: Chuyển sang API Key ${keyIndex + 1}...`);
-        }
-    }
-
-    if (!responseText) {
-        throw new Error('Tất cả API Key và Model đều hết quota. Vui lòng thử lại sau.');
-    }
+    const responseText = await generateChatCompletion([
+        { role: 'system', content: 'Chỉ trả về JSON hợp lệ theo cấu trúc được yêu cầu. Không bọc JSON trong markdown.' },
+        { role: 'user', content: systemPrompt }
+    ], { temperature: 0.2, format: 'json' });
 
     // Parse JSON response
     const cleaned = responseText

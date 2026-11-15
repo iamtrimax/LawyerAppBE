@@ -1,6 +1,22 @@
 const legalFormServices = require("../services/legalForm.services");
 const userModel = require("../model/user.model");
 const sanitizeError = require("../utils/sanitizeError");
+const { createLegalFormUploadUrl } = require("../services/r2Storage.service");
+
+const createLegalFormUploadUrlController = async (req, res) => {
+    try {
+        const upload = await createLegalFormUploadUrl({
+            lawyerId: req.lawyer._id,
+            filename: req.body.filename,
+            contentType: req.body.contentType,
+            size: Number(req.body.size),
+        });
+        res.status(200).json({ success: true, ...upload });
+    } catch (error) {
+        console.error("createLegalFormUploadUrlController error:", error.message);
+        res.status(error.statusCode || 500).json({ success: false, message: sanitizeError(error) });
+    }
+};
 
 const getFormsController = async (req, res) => {
     try {
@@ -227,6 +243,7 @@ module.exports = {
     updateFormController,
     deleteFormController,
     createLawyerFormController,
+    createLegalFormUploadUrlController,
     getMyFormsController,
     updateMyFormController,
     deleteMyFormController,

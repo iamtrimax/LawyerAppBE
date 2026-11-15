@@ -9,18 +9,7 @@ const http = require("http");
 const { initSocket } = require("./config/socket");
 const { initReminderCron } = require("./services/reminder.cron");
 const { initLegalSyncCron } = require("./services/legalSync.cron");
-const { initializeVectorCache } = require("./services/aiSearch.service");
-const { initNeo4j, closeNeo4j } = require("./config/neo4j");
-
-// Khởi tạo Neo4j connection pool
-initNeo4j();
-
-// Shutdown hook để dọn dẹp kết nối
-process.on("SIGINT", async () => {
-  await closeNeo4j();
-  process.exit(0);
-});
-
+const { initializeRagIndex, refreshRagIndex } = require("./services/aiSearch.service");
 // Ẩn header X-Powered-By: Express (giảm lộ thông tin stack)
 app.disable("x-powered-by");
 
@@ -28,7 +17,7 @@ app.disable("x-powered-by");
 // Có thể ghi đè qua biến môi trường CORS_ORIGINS (vd: "https://a.com,https://b.com")
 const allowedOrigins = (
   process.env.CORS_ORIGINS ||
-  "https://pencillaw.com,https://www.pencillaw.com,https://api.pencillaw.com,https://admin.pencillaw.com"
+  "https://pencillaw.com,https://www.pencillaw.com,https://api.pencillaw.com,https://admin.pencillaw.com,http://localhost:8081"
 )
   .split(",")
   .map((o) => o.trim())
@@ -80,10 +69,16 @@ connectMongoDb()
     const port = process.env.PORT || 3000;
     server.listen(port, "0.0.0.0", () => {
       console.log(`Server đang chạy tại port ${port}`);
-      // Tải Vector Cache sau khi kết nối DB và server đã lắng nghe
-      initializeVectorCache().catch((err) =>
-        console.error("Initial Cache Load Failed:", err),
+      // Tạo hoặc cập nhật chỉ mục RAG sau khi kết nối DB và server đã lắng nghe
+      initializeRagIndex().catch((err) =>
+        console.error("Initial RAG Index Load Failed:", err),
       );
+      setInterval(() => {
+        console.log("[RAG] Scheduled index refresh started.");
+        refreshRagIndex().catch((err) =>
+          console.error("[RAG] Scheduled index refresh failed:", err.message),
+        );
+      }, 5 * 60 * 1000);
     });
   })
   .catch((error) => {

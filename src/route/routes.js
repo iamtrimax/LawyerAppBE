@@ -18,6 +18,7 @@ const {
     updateArticleController,
     deleteArticleController,
     aiSearchController,
+    aiSearchStreamController,
     trackArticleDownloadController
 } = require("../controller/article.controller");
 const {
@@ -40,6 +41,7 @@ const {
     searchFormsController,
     viewFileController,
     createLawyerFormController,
+    createLegalFormUploadUrlController,
     getMyFormsController,
     updateMyFormController,
     deleteMyFormController
@@ -82,6 +84,8 @@ router.use(globalLimiter);
 
 // article routes
 router.get("/articles/ai-search", publicData('articleSearch'), aiSearchController);
+router.post("/articles/ai-chat/stream", aiSearchStreamController);
+router.post("/articles/ai-chat", publicData('articleSearch'), aiSearchController);
 router.get("/articles", publicData('articles'), getArticlesController);
 // QUAN TRỌNG: route slug phải đặt TRƯỚC route :id để Express không nhầm 'slug' là ID
 router.get("/articles/slug/:slug", publicData('article'), getArticleBySlugController);
@@ -141,6 +145,7 @@ router.put("/lawyer/booking/confirm-payment/:bookingId", verifyAccessToken, veri
 router.put("/lawyer/profile", verifyAccessToken, verifyLawyer, updateLawyerProfileController);
 
 // lawyer legal forms management
+router.post("/lawyer/forms/upload-url", verifyAccessToken, verifyLawyer, createLegalFormUploadUrlController);
 router.post("/lawyer/forms/create", verifyAccessToken, verifyLawyer, createLawyerFormController);
 router.get("/lawyer/forms/my-forms", verifyAccessToken, verifyLawyer, getMyFormsController);
 router.put("/lawyer/forms/update/:id", verifyAccessToken, verifyLawyer, updateMyFormController);
@@ -180,12 +185,9 @@ router.post("/admin/legal-forms", verifyAccessToken, verifyAdmin, createFormCont
 router.put("/admin/legal-forms/:id", verifyAccessToken, verifyAdmin, updateFormController);
 router.delete("/admin/legal-forms/:id", verifyAccessToken, verifyAdmin, deleteFormController);
 
-// GraphRAG Management
-const { buildGraphForAllArticles, buildGraphForArticle, testQueryGraph, clearAllGraphData } = require("../controller/graph.controller");
-router.post("/admin/graph/build-all", verifyAccessToken, verifyAdmin, buildGraphForAllArticles);
-router.post("/admin/graph/build-article/:articleId", verifyAccessToken, verifyAdmin, buildGraphForArticle);
-router.post("/admin/graph/test-query", verifyAccessToken, verifyAdmin, testQueryGraph);
-router.delete("/admin/graph/clear", verifyAccessToken, verifyAdmin, clearAllGraphData);
+// RAG index management
+const { reindexRagController } = require("../controller/rag.controller");
+router.post("/admin/rag/reindex", verifyAccessToken, verifyAdmin, reindexRagController);
 router.get("/admin/lawyers", verifyAccessToken, verifyAdmin, getAllLawyers);
 // payment routes
 router.post("/payment/sepay-webhook", handleSePayWebhookController);

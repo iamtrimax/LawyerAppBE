@@ -1,8 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const articleModel = require('../model/article.model');
-const { generateEmbedding } = require('./embedding.service');
-const { updateVectorCache } = require('./aiSearch.service');
+const { refreshRagIndex } = require('./aiSearch.service');
 
 // Base URL for constructing absolute links
 const BASE_URL = 'https://vbpl.vn';
@@ -155,9 +154,6 @@ const parseDocumentDetails = async (url, listingTitle, categoryName) => {
     const urlObj = new URL(url);
     const externalId = urlObj.searchParams.get('ItemID');
 
-    // Generate Embedding for semantic search
-    const embedding = await generateEmbedding(title + " " + $(cleanContent).text().substring(0, 2000));
-
     return {
         title,
         content: cleanContent,
@@ -168,8 +164,7 @@ const parseDocumentDetails = async (url, listingTitle, categoryName) => {
         crawledAt: new Date(),
         publishedDate,
         thumbnail,
-        attachments,
-        embedding
+        attachments
     };
 };
 
@@ -274,16 +269,9 @@ const syncVbplData = async () => {
                                 { upsert: true, new: true }
                             );
                             if (updatedDoc) {
-                                if (updatedDoc.embedding) {
-                                    updateVectorCache(updatedDoc._id, updatedDoc.embedding);
-                                }
-                                // Xây dựng đồ thị Neo4j cho văn bản mới crawl này
-                                try {
-                                    const { extractGraphFromArticle } = require('./graphExtraction.service');
-                                    await extractGraphFromArticle(updatedDoc);
-                                } catch (graphErr) {
-                                    console.error(`  [Neo4j Hook] Lỗi xây dựng đồ thị cho ${updatedDoc._id}:`, graphErr.message);
-                                }
+                                await refreshRagIndex().catch((indexError) =>
+                                    console.error('RAG index refresh failed after crawl:', indexError.message)
+                                );
                             }
                             totalSaved++;
                         await new Promise(r => setTimeout(r, 200));

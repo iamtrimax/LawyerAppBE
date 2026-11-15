@@ -1,523 +1,136 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const Article = require('../model/article.model');
-const { generateEmbedding } = require('./embedding.service');
-const { graphSearch } = require('./graphSearch.service');
-
 const NodeCache = require('node-cache');
-const axios = require('axios');
-const cheerio = require('cheerio');
+const { retrieve, refreshIndex } = require('./rag.service');
+const { generateChatCompletion } = require('./ollama.service');
+const { runInteractiveRequest } = require('./ollamaPriority.service');
 const sanitizeError = require('../utils/sanitizeError');
 require('dotenv').config();
 
-// Cấu hình axios với timeout
-const axiosInstance = axios.create({
-    timeout: 8000,
-    headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+const searchCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+const generateAnswer = async ({ query, history = [], matches, onToken, signal }) => {
+    const isQwen3 = process.env.OLLAMA_CHAT_MODEL?.toLowerCase().startsWith('qwen3');
+    const context = matches.slice(0, 4).map((match, index) =>
+        `[Nguồn ${index + 1}] Tiêu đề: ${match.title}\nDanh mục: ${match.category || 'Pháp luật'}\nNội dung trích từ tài liệu đã lưu trong hệ thống: ${match.content.slice(0, 2200)}`
+    ).join('\n\n');
+    const messages = [
+        {
+            role: 'system',
+            content: `Bạn là trợ lý pháp luật, giải thích quy định cho người dân bằng tiếng Việt rõ ràng, chính xác và dễ áp dụng.
+Yêu cầu khi trả lời:
+1. Trả lời thẳng điều người dùng hỏi ngay ở câu đầu; dùng tiếng Việt tự nhiên, kể cả khi câu hỏi hoặc tài liệu nguồn viết bằng ngôn ngữ khác.
+2. Giải thích nội dung pháp luật bằng lời dễ hiểu: quy định nói gì, áp dụng cho ai/trường hợp nào, và hệ quả hoặc việc cần làm tiếp theo nếu CONTEXT có nêu. Giải nghĩa thuật ngữ chuyên môn khi cần. Không chỉ nói tên tài liệu, không chỉ dẫn nguồn, không chép lại nguyên văn dài.
+3. Tập trung đúng phạm vi câu hỏi. Với câu hỏi rộng, tóm tắt các điểm chính theo gạch đầu dòng; với câu hỏi cụ thể, giải thích điều kiện, thời hạn, quyền/nghĩa vụ hoặc ngoại lệ liên quan nếu có trong CONTEXT. Có thể đưa ví dụ ngắn để làm rõ, nhưng phải ghi rõ đó là ví dụ và không thêm quy định ngoài tài liệu.
+4. Mỗi nhận định pháp lý phải được hỗ trợ bởi tài liệu trong CONTEXT và có trích dẫn [Nguồn 1], [Nguồn 2]... ngay sau nhận định. Chỉ trích dẫn số nguồn hiện diện trong CONTEXT. Không tự bịa điều luật, số điều, thời hạn, mức phạt, URL hoặc kết luận pháp lý.
+5. Chỉ sử dụng các tài liệu hệ thống được cung cấp trong CONTEXT; không tìm kiếm hoặc viện dẫn nguồn bên ngoài. Danh sách nguồn tham khảo được ứng dụng hiển thị riêng, vì vậy phần trả lời phải giải thích nội dung chứ không thay bằng danh sách nguồn.
+6. Nếu tài liệu không đủ để trả lời một phần, nói rõ phần nào chưa thể kết luận từ dữ liệu hiện có; vẫn trả lời các phần có căn cứ và dẫn nguồn cho chúng.
+7. Chỉ xuất câu trả lời cuối cùng bằng tiếng Việt. Không xuất suy luận nội bộ, từng bước phân tích, lời dẫn như "Okay, let me think", hoặc nhắc lại các quy tắc này.
+8. Lịch sử hội thoại chỉ dùng để hiểu câu hỏi tiếp nối; không dùng câu trả lời cũ làm căn cứ pháp lý thay cho CONTEXT.
+
+CONTEXT (chỉ gồm các đoạn trích từ tài liệu đã lưu và lập chỉ mục trong hệ thống):
+${context || '(Không tìm thấy tài liệu liên quan trong dữ liệu hệ thống.)'}`
+        },
+        ...history.slice(-8).filter((message) => message?.text && message.senderID !== 'AI_ASSISTANT' && !message.isAiResponse).slice(-3).map((message) => ({
+            role: 'user',
+            content: String(message.text).slice(0, 1200)
+        })),
+        {
+            role: 'user',
+            content: query
+        },
+        // Qwen3's documented empty think block forces a direct final answer.
+        // This prevents the reasoning channel from consuming the whole output budget.
+        ...(isQwen3 ? [{ role: 'assistant', content: '<think>\n\n</think>\n\n' }] : [])
+    ];
+
+    return generateChatCompletion(messages, {
+        temperature: 0.6,
+        onToken,
+        signal,
+        ...(isQwen3 ? { think: false } : {}),
+        modelOptions: { top_p: 0.8, top_k: 20, num_ctx: 8192, num_predict: 512 }
+    });
+};
+
+const aiSearch = async (query, history = [], streamCallbacks = {}) => runInteractiveRequest(async () => {
+    try {
+        if (streamCallbacks.signal?.aborted) throw new Error('Yêu cầu chat đã bị hủy.');
+        const normalizedQuery = String(query || '').trim();
+        if (!normalizedQuery) throw new Error('Câu hỏi không được để trống');
+
+        const cacheKey = `rag_vi_summary_v5_${normalizedQuery.toLowerCase()}`;
+        if (!history.length) {
+            const cached = searchCache.get(cacheKey);
+            if (cached) {
+                streamCallbacks.onStatus?.('Đã tìm thấy câu trả lời trong bộ nhớ đệm.');
+                streamCallbacks.onToken?.(cached.answer);
+                return cached;
+            }
+        }
+
+        streamCallbacks.onStatus?.('Đang tìm tài liệu liên quan trong hệ thống...');
+        const retrievalStartedAt = Date.now();
+        const matches = await retrieve(normalizedQuery, undefined, { signal: streamCallbacks.signal });
+        console.log(`[RAG] Truy xuất xong trong ${Date.now() - retrievalStartedAt} ms; tìm thấy ${matches.length} đoạn.`);
+        const uniqueMatches = [];
+        const seenSourceIds = new Set();
+        for (const match of matches) {
+            if (seenSourceIds.has(match.sourceId)) continue;
+            seenSourceIds.add(match.sourceId);
+            uniqueMatches.push(match);
+            if (uniqueMatches.length === 4) break;
+        }
+        const generationStartedAt = Date.now();
+        streamCallbacks.onStatus?.('Đang tổng hợp câu trả lời...');
+        const answer = await generateAnswer({
+            query: normalizedQuery,
+            history,
+            matches: uniqueMatches,
+            onToken: streamCallbacks.onToken,
+            signal: streamCallbacks.signal
+        });
+        console.log(`[RAG] Sinh câu trả lời xong trong ${Date.now() - generationStartedAt} ms.`);
+        const sourceMap = new Map();
+        for (const match of uniqueMatches) {
+            if (!sourceMap.has(match.sourceId)) {
+                const [sourceTypeFromId, ...idParts] = String(match.sourceId || '').split(':');
+                const sourceType = match.sourceType || sourceTypeFromId || 'unknown';
+                const documentId = idParts.join(':') || String(match._id || '');
+                sourceMap.set(match.sourceId, {
+                    // Keep the Mongo document ID explicit for client navigation.
+                    _id: documentId,
+                    id: documentId,
+                    sourceId: match.sourceId,
+                    sourceType,
+                    ...(sourceType === 'article' ? {
+                        articleId: documentId,
+                        articleApiPath: `/api/articles/${documentId}`
+                    } : {}),
+                    title: match.title,
+                    url: match.url,
+                    category: match.category,
+                    content: match.content
+                });
+            }
+        }
+
+        const result = { answer, sources: [...sourceMap.values()] };
+        if (!history.length) searchCache.set(cacheKey, result);
+        return result;
+    } catch (error) {
+        console.error('RAG search error:', error.message);
+        throw new Error('Lỗi trong quá trình RAG xử lý câu hỏi: ' + sanitizeError(error));
     }
 });
 
-/**
- * Crawl nội dung chính từ URL, hỗ trợ follow redirect
- * Trả về { title, content, textContent, finalUrl } hoặc null
- */
-async function crawlUrl(url) {
+const initializeRagIndex = async () => {
+    console.log('[RAG] Backend đã kết nối MongoDB, bắt đầu nạp chỉ mục.');
     try {
-        const response = await axiosInstance.get(url, { maxRedirects: 5 });
-        const finalUrl = response.request?.res?.responseUrl || response.config?.url || url;
-        const parsedUrl = new URL(finalUrl);
-        const domain = parsedUrl.hostname.toLowerCase();
-        
-        const $ = cheerio.load(response.data);
-        
-        // Trích xuất tiêu đề
-        const pageTitle = $('h1').first().text().trim() 
-            || $('title').text().trim()
-            || $('meta[property="og:title"]').attr('content')
-            || '';
-        
-        // 1. DOMAIN-SPECIFIC SELECTORS (Tìm đúng vùng chứa nội dung của các trang chính thống)
-        let $container = null;
-        
-        if (domain.includes('luatvietnam.vn')) {
-            $container = $('.the-article-body').first();
-        } else if (domain.includes('thuvienphapluat.vn')) {
-            $container = $('.news-content, .content1, .post-content').first();
-        } else if (domain.includes('luatminhkhue.vn') || domain.includes('luatduonggia.vn')) {
-            $container = $('.post-content, .entry-content').first();
-        } else if (domain.includes('i-law.vn')) {
-            $container = $('#question-body').first();
-        } else {
-            // Fallback cho các trang khác
-            const fallbackSelectors = ['.the-article-body', '.article-content', '.content-detail', '.post-content', '.entry-content', '.news-content', '#content', 'article', 'main'];
-            for (const selector of fallbackSelectors) {
-                const el = $(selector);
-                if (el.length > 0) {
-                    $container = el.first();
-                    break;
-                }
-            }
-        }
-
-        let cleanHtml = '';
-        let plainText = '';
-
-        if ($container && $container.length > 0) {
-            // 2. LÀM SẠCH RÁC CƠ BẢN VÀ MÃ MS WORD
-            $container.find('script, style, link, meta, xml, object, embed, noscript, iframe, .adv-slot-wrapper, .ad-placeholder, .social-sticky, .the-article-toc').remove();
-            
-            let rawHtml = $container.html();
-            // Xóa comment HTML và thẻ rác MS Word
-            rawHtml = rawHtml.replace(/<!--[\s\S]*?-->/g, '');
-            rawHtml = rawHtml.replace(/<(?:o|w|m|v):[\s\S]*?>[\s\S]*?<\/(?:o|w|m|v):[\s\S]*?>/g, '');
-            
-            // 3. LÀM SẠCH THUỘC TÍNH NHƯNG GIỮ NGUYÊN CẤU TRÚC (Bảng, Danh sách)
-            const $clean = cheerio.load(rawHtml, null, false); // false để không tự động bọc <html><body>
-            
-            // Chỉ giữ lại các thuộc tính quan trọng để duy trì cấu trúc
-            const ALLOWED_ATTRIBS = ['colspan', 'rowspan', 'href'];
-            
-            $clean('*').each(function() {
-                if (this.attribs) {
-                    for (const attr in this.attribs) {
-                        if (!ALLOWED_ATTRIBS.includes(attr.toLowerCase())) {
-                            $clean(this).removeAttr(attr);
-                        }
-                    }
-                }
-            });
-            
-            cleanHtml = $clean.html().replace(/\s+/g, ' ').trim();
-            
-            // Bổ sung xuống dòng cho các block để lấy plainText đẹp hơn
-            $clean('br').replaceWith('\n');
-            $clean('p, div, h1, h2, h3, h4, h5, h6, li, tr').append('\n');
-            plainText = $clean.text().replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, '\n\n').trim();
-        }
-        
-        // Nếu không có nội dung, báo lỗi ngầm định để bỏ qua nguồn này
-        if (!plainText || plainText.length < 200) {
-            console.warn(`⚠️ Crawled content too short or missing for ${finalUrl}`);
-            return null;
-        }
-
-        return {
-            title: pageTitle,
-            content: cleanHtml ? cleanHtml.substring(0, 15000) : '',
-            textContent: plainText.substring(0, 8000),
-            finalUrl: finalUrl
-        };
+        const status = await refreshIndex();
+        console.log(`[RAG] Chỉ mục sẵn sàng: ${status.sources} tài liệu, ${status.chunks} đoạn; mới tạo ${status.embeddedChunks} embeddings.`);
+        return status;
     } catch (error) {
-        console.error(`Crawl error for ${url}:`, error.message);
-        return null;
-    }
-}
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const searchCache = new NodeCache({ stdTTL: 3600 }); // Cache for 1 hour
-
-// IN-MEMORY VECTOR CACHE FOR SPEEDING UP SEARCH
-let vectorCache = [];
-let isCacheInitializing = false;
-
-/**
- * Initialize the Vector Cache from Database
- */
-const initializeVectorCache = async () => {
-    if (isCacheInitializing) return;
-    isCacheInitializing = true;
-    try {
-        console.log("📥 Initializing AI Vector Cache...");
-        const startTime = Date.now();
-        const candidates = await Article.find({
-            embedding: { $exists: true, $ne: null, $not: { $size: 0 } }
-        }).select('embedding');
-        
-        vectorCache = candidates.map(doc => ({
-            _id: doc._id,
-            embedding: doc.embedding
-        }));
-        
-        console.log(`✅ AI Vector Cache Initialized: ${vectorCache.length} articles in ${Date.now() - startTime}ms`);
-    } catch (error) {
-        console.error("❌ Failed to initialize AI Vector Cache:", error.message);
-    } finally {
-        isCacheInitializing = false;
+        console.error('RAG index initialization failed:', error.message);
+        throw error;
     }
 };
 
-/**
- * Update or Add a single article to the Vector Cache
- */
-const updateVectorCache = (articleId, embedding) => {
-    if (!articleId || !embedding) return;
-    const index = vectorCache.findIndex(v => v._id.toString() === articleId.toString());
-    if (index !== -1) {
-        vectorCache[index].embedding = embedding;
-    } else {
-        vectorCache.push({ _id: articleId, embedding });
-    }
-};
-
-/**
- * Cosine Similarity Calculation
- */
-const cosineSimilarity = (vecA, vecB) => {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
-    }
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-};
-
-/**
- * AI Search Service using RAG + Vector Search + Caching + History Context
- */
-const aiSearch = async (query, history = []) => {
-    try {
-        const startTime = Date.now();
-
-        // 0. CHECK CACHE (Chỉ cache cho query đơn lẻ, có history thì bỏ qua cache để đảm bảo tính động)
-        const cacheKey = `search_${query.toLowerCase().trim()}`;
-        if (history.length === 0) {
-            const cachedResult = searchCache.get(cacheKey);
-            if (cachedResult) {
-                console.log("🚀 Serving from Cache");
-                return cachedResult;
-            }
-        }
-
-        // 1. CHẠY GRAPHRAG (NEO4J + VECTOR HYBRID)
-        let graphResults = [];
-        try {
-            graphResults = await graphSearch(query);
-            console.log(`🧠 [GraphRAG] Tìm thấy ${graphResults.length} ngữ cảnh đồ thị liên quan.`);
-        } catch (graphError) {
-            console.warn("⚠️ [GraphRAG] Lỗi truy xuất Neo4j, sử dụng RAG thuần làm fallback:", graphError.message);
-        }
-
-        let articles = [];
-        let context = "";
-
-        if (graphResults.length > 0) {
-            // Dựng ngữ cảnh trực tiếp từ GraphRAG mở rộng
-            context = "Dưới đây là một số thông tin từ cấu trúc đồ thị pháp luật tìm thấy:\n\n";
-            graphResults.forEach((res, index) => {
-                context += `[Tài liệu ${index + 1}]:\n${res.fullContext}\n`;
-                // Mock cấu trúc article để trả về reference sources thống nhất
-                articles.push({
-                    _id: res.mongoId,
-                    title: res.title,
-                    content: res.content,
-                    category: "Đồ thị Pháp luật",
-                    sourceUrl: "" // Sẽ map sau từ MongoDB nếu cần hoặc để trống
-                });
-            });
-        } else {
-            // FALLBACK: RAG THUẦN (VECTOR SEARCH + TITLE MATCH CŨ)
-            console.log("ℹ️ [Fallback RAG] Thực hiện tìm kiếm RAG thuần...");
-            // 1. DIRECT TITLE SEARCH (Ưu tiên khớp tiêu đề)
-            try {
-                const titleMatches = await Article.find({
-                    title: { $regex: query.trim(), $options: 'i' }
-                }).select('title content category sourceUrl')
-                  .limit(3);
-                
-                if (titleMatches.length > 0) {
-                    articles = titleMatches.map(art => ({
-                        ...art.toObject(),
-                        similarity: 1.0, // Gán độ tương đồng tối đa cho khớp tiêu đề
-                        matchType: 'title'
-                    }));
-                    console.log(`🔍 Found ${articles.length} articles by Title Match`);
-                }
-            } catch (titleError) {
-                console.warn("⚠️ Title search failed, continuing with Vector search.");
-            }
-
-            // 2. VECTOR SEARCH (Tìm theo ý nghĩa nếu chưa đủ hoặc để bổ sung)
-            let queryEmbedding = null;
-            try {
-                queryEmbedding = await generateEmbedding(query);
-            } catch (embedError) {
-                console.warn("⚠️ Embedding generation failed, continuing with current results.");
-            }
-
-            if (queryEmbedding) {
-                if (vectorCache.length === 0) await initializeVectorCache();
-
-                if (vectorCache.length > 0) {
-                    const SIMILARITY_THRESHOLD = 0.85; 
-                    const ranked = vectorCache.map(doc => ({
-                        _id: doc._id,
-                        similarity: cosineSimilarity(queryEmbedding, doc.embedding)
-                    }))
-                    .filter(r => r.similarity >= SIMILARITY_THRESHOLD)
-                    .sort((a, b) => b.similarity - a.similarity)
-                    .slice(0, 3);
-
-                    if (ranked.length > 0) {
-                        const topIds = ranked.map(r => r._id);
-                        const topArticles = await Article.find({ _id: { $in: topIds } })
-                            .select('title content category sourceUrl');
-
-                        topArticles.forEach(art => {
-                            // Tránh trùng lặp với kết quả tìm theo tiêu đề
-                            if (!articles.find(a => a._id.toString() === art._id.toString())) {
-                                const rank = ranked.find(r => r._id.toString() === art._id.toString());
-                                articles.push({
-                                    ...art.toObject(),
-                                    similarity: rank ? rank.similarity : 0,
-                                    matchType: 'vector'
-                                });
-                            }
-                        });
-                    }
-                }
-            }
-
-            // Sắp xếp lại: Khớp tiêu đề lên trước, sau đó đến độ tương đồng vector
-            articles.sort((a, b) => {
-                if (a.matchType === 'title' && b.matchType !== 'title') return -1;
-                if (a.matchType !== 'title' && b.matchType === 'title') return 1;
-                return b.similarity - a.similarity;
-            });
-
-            context = "Dưới đây là một số thông tin từ các văn bản pháp luật tìm thấy:\n\n";
-            articles.forEach((art, index) => {
-                context += `[Tài liệu ${index + 1}]:\nTiêu đề: ${art.title}\nNội dung: ${art.content.replace(/<[^>]*>?/gm, '').substring(0, 1500)}...\n\n`;
-            });
-        }
-
-        const hasLocalContext = articles.length > 0;
-
-        // Định dạng lịch sử hội thoại
-        let historyContext = "";
-        if (history && history.length > 0) {
-            historyContext = "LỊCH SỬ HỘI THOẠI TRƯỚC ĐÓ:\n";
-            history.slice(-5).forEach(msg => { // Lấy 5 tin nhắn gần nhất
-                const role = (msg.senderID === 'AI_ASSISTANT' || msg.isAiResponse) ? "AI" : "Người dùng";
-                historyContext += `${role}: ${msg.text}\n`;
-            });
-            historyContext += "\n--- END HISTORY ---\n\n";
-        }
-
-
-        // 4. CONSTRUCT PROMPT
-        const systemPrompt = hasLocalContext ? `
-Bạn là một trợ lý AI pháp luật thân thiện. 
-NHIỆM VỤ: Trả lời câu hỏi dựa trên CONTEXT và HISTORY.
-
-QUY TẮC ƯU TIÊN:
-1. SỬ DỤNG CONTEXT: Đây là các bài viết chính thống trong hệ thống của chúng ta. Bạn PHẢI ưu tiên sử dụng thông tin từ CONTEXT để trả lời.
-2. NGUỒN GOOGLE CHÍNH THỐNG: Nếu phải dùng Google Search, hãy cố gắng ưu tiên lấy từ các trang: luatvietnam.vn, thuvienphapluat.vn (Ví dụ: tự động thêm "site:luatvietnam.vn OR site:thuvienphapluat.vn" vào truy vấn tìm kiếm ngầm của bạn).
-3. TÍNH CHÍNH XÁC: Tuyệt đối không nhầm lẫn giữa các quy định. Nếu CONTEXT nói về chủ đề A nhưng người dùng hỏi về chủ đề B, hãy sử dụng kiến thức chung hoặc Google Search thay vì cố ép nội dung từ CONTEXT vào.
-
-PHONG CÁCH TRẢ LỜI:
-1. NGẮN GỌN & ĐÚNG TRỌNG TÂM.
-2. TỰ NHIÊN: Trò chuyện như người bình thường, không máy móc.
-3. BÁM SÁT HISTORY: Nếu có câu hỏi tiếp nối.
-
----
-${historyContext}
-CONTEXT (ƯU TIÊN):
-${context}
----
-` : `
-Bạn là một trợ lý AI pháp luật thân thiện. 
-Hãy sử dụng kiến thức của bạn kết hợp với Google Search để trả lời NGẮN GỌN, TỰ NHIÊN như đang chat bình thường.
-Bám sát HISTORY nếu người dùng đang hỏi tiếp các ý trước.
-
-QUY TẮC TÌM KIẾM GOOGLE:
-- Bạn PHẢI ƯU TIÊN giới hạn kết quả tìm kiếm từ các trang web pháp luật chính thống như luatvietnam.vn hoặc thuvienphapluat.vn (Bằng cách tự động thêm "site:luatvietnam.vn OR site:thuvienphapluat.vn" vào từ khóa tìm kiếm của bạn).
-
----
-${historyContext}
----
-`;
-
-        const finalPrompt = `${systemPrompt}\nCÂU HỎI HIỆN TẠI: ${query}\nTRẢ LỜI:`;
-
-        // 5. GENERATE ANSWER WITH MULTI-KEY & MULTI-MODEL FALLBACK
-        const API_KEYS = process.env.GEMINI_API_KEY.split(',').map(k => k.trim());
-        const AVAILABLE_MODELS = [
-            "gemini-2.5-flash", 
-            "gemini-2.5-pro",
-            "gemini-2.0-flash",
-            "gemini-flash-latest",
-            "gemini-pro-latest"
-        ];
-
-        let answer = "";
-        let keyIndex = 0;
-        let modelIndex = 0;
-        let retryCount = 0;
-        const MAX_RETRIES_PER_MODEL = 1;
-
-        // Vòng lặp thử từng Key
-        while (keyIndex < API_KEYS.length && !answer) {
-            const currentKey = API_KEYS[keyIndex];
-            const genAIInstance = new GoogleGenerativeAI(currentKey);
-            modelIndex = 0; // Reset model cho key mới
-
-            // Vòng lặp thử từng Model của Key đó
-            while (modelIndex < AVAILABLE_MODELS.length) {
-                const currentModelName = AVAILABLE_MODELS[modelIndex];
-                const model = genAIInstance.getGenerativeModel({ 
-                    model: currentModelName,
-                    tools: [{ googleSearch: {} }] 
-                });
-
-                try {
-                    const result = await model.generateContent(finalPrompt);
-                    const response = await result.response;
-                    answer = response.text();
-                    
-                    // 6. TRÍCH XUẤT GROUNDING METADATA (GOOGLE SEARCH SOURCES)
-                    if (response.candidates?.[0]?.groundingMetadata) {
-                        const metadata = response.candidates[0].groundingMetadata;
-                        const searchSources = [];
-                        
-                        if (metadata.groundingChunks) {
-                            // Lấy danh sách URL từ Google Grounding
-                            const rawChunks = metadata.groundingChunks
-                                .filter(chunk => chunk.web)
-                                .slice(0, 3); // Giới hạn 3 nguồn để tối ưu tốc độ
-
-                            // Luôn crawl Google sources để lấy title + content thật
-                            console.log(`🕸️ Đang crawl ${rawChunks.length} nguồn từ Google...`);
-                            const crawlPromises = rawChunks.map(async (chunk, index) => {
-                                const crawled = await crawlUrl(chunk.web.uri);
-                                
-                                // CHỈ CHẤP NHẬN BÀI VIẾT LẤY ĐƯỢC "TOÀN BỘ NỘI DUNG" (Độ dài textContent > 600 ký tự)
-                                if (crawled && crawled.textContent && crawled.textContent.length > 600) {
-                                    return {
-                                        _id: `google-source-${index}-${Date.now()}`,
-                                        title: crawled.title || chunk.web.title || "Nguồn từ Google",
-                                        sourceUrl: crawled.finalUrl || chunk.web.uri,
-                                        category: "Tham khảo Google",
-                                        content: crawled.content || ""
-                                    };
-                                } else {
-                                    console.log(`⏭️ Bỏ qua nguồn Google không đủ nội dung hoặc bị chặn: ${chunk.web.uri}`);
-                                    return null;
-                                }
-                            });
-                            const crawledSources = (await Promise.all(crawlPromises)).filter(Boolean);
-
-                            if (articles.length === 0) {
-                                // Không có bài viết nội bộ -> dùng Google sources
-                                articles = crawledSources;
-                            } else {
-                                // Có bài viết nội bộ -> bổ sung Google sources
-                                const existingUrls = articles.map(a => a.sourceUrl);
-                                crawledSources.forEach(s => {
-                                    if (!existingUrls.includes(s.sourceUrl)) {
-                                        articles.push(s);
-                                    }
-                                });
-                            }
-                        }
-                    }
-
-                    if (answer) break; 
-                } catch (err) {
-                    const errorMessage = err.message || "";
-                    const isQuotaError = errorMessage.includes('429') || 
-                                       errorMessage.includes('Quota exceeded') || 
-                                       errorMessage.includes('rate limit');
-                    const isRetryableError = errorMessage.includes('503') || 
-                                           errorMessage.includes('high demand');
-
-                    if (isQuotaError) {
-                        console.warn(`⚠️ Key ${keyIndex + 1} - Model ${currentModelName} hết quota.`);
-                        modelIndex++;
-                        continue;
-                    }
-
-                    if (isRetryableError && retryCount < MAX_RETRIES_PER_MODEL) {
-                        retryCount++;
-                        await new Promise(r => setTimeout(r, 1000));
-                        continue;
-                    }
-
-                    modelIndex++;
-                    retryCount = 0;
-                }
-            }
-
-            if (!answer) {
-                console.warn(`❌ Toàn bộ model của Key ${keyIndex + 1} đều không khả dụng. Chuyển sang Key tiếp theo...`);
-                keyIndex++;
-            }
-        }
-
-        if (!answer) {
-            answer = "Hiện tại tất cả các khóa API và mô hình AI đều đã hết lượt dùng miễn phí (Quota exceeded). Vui lòng thử lại sau vài phút hoặc bổ sung API Key mới.";
-        }
-
-        console.log(`TotalSearchTime: ${Date.now() - startTime}ms`);
-
-        // 7. LỌC NGUỒN THAM KHẢO CHÍNH XÁC (RELEVANCE FILTERING)
-        const stopWords = ['trong', 'của', 'theo', 'được', 'những', 'các', 'một', 'cho', 'này', 'với', 'đến', 'từ', 'là', 'và', 'hoặc', 'không', 'có', 'tại', 'về', 'phần', 'điều', 'khoản', 'quy', 'định', 'hướng', 'dẫn', 'thi', 'hành'];
-        
-        const filterRelevantSources = (sources, query, answer) => {
-            const queryKeywords = query.toLowerCase().split(/\s+/)
-                .filter(w => w.length > 2 && !stopWords.includes(w));
-            
-            return sources.filter(source => {
-                const titleLower = (source.title || "").toLowerCase();
-                const id = source._id?.toString() || '';
-                
-                // 1. Nếu là nguồn nội bộ và đã đạt ngưỡng tương đồng vector cao -> Giữ lại
-                // (Chỉ lọc thêm nếu query keywords rất đặc thù)
-                if (!id.startsWith('google-source-')) {
-                    const matchCount = queryKeywords.filter(kw => titleLower.includes(kw)).length;
-                    // Nếu có ít nhất 1 từ khóa quan trọng hoặc độ tương đồng vector đã đảm bảo
-                    return matchCount >= 1 || queryKeywords.length === 0;
-                }
-                
-                // 2. Nếu là nguồn Google: Kiểm tra độ liên quan kỹ hơn
-                if (id.startsWith('google-source-')) {
-                    if (titleLower.length < 5) return false;
-                    const matchCount = queryKeywords.filter(kw => titleLower.includes(kw)).length;
-                    return matchCount >= 2; // Nguồn Google phải khớp ít nhất 2 từ khóa
-                }
-                
-                return false;
-            });
-        };
-
-        const relevantArticles = filterRelevantSources(articles, query, answer);
-
-        const finalResult = {
-            answer: answer.trim(),
-            sources: relevantArticles.filter(a => a && a._id).map(a => ({
-                _id: a._id,
-                title: a.title,
-                url: a.sourceUrl,
-                category: a.category,
-                content: a.content || ""
-            }))
-        };
-
-        // SAVE TO CACHE
-        searchCache.set(cacheKey, finalResult);
-
-        return finalResult;
-
-    } catch (error) {
-        console.error('AI Search Error:', error.message);
-        throw new Error('Lỗi trong quá trình AI xử lý câu hỏi: ' + sanitizeError(error));
-    }
-};
-
-module.exports = {
-    aiSearch,
-    initializeVectorCache,
-    updateVectorCache
-};
+module.exports = { aiSearch, initializeRagIndex, refreshRagIndex: refreshIndex };

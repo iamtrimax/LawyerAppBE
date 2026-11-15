@@ -1,12 +1,9 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const articleModel = require('../model/article.model');
-const { generateEmbedding } = require('./embedding.service');
-const { updateVectorCache } = require('./aiSearch.service');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateChatCompletion } = require('./ollama.service');
+const { refreshRagIndex } = require('./aiSearch.service');
 require('dotenv').config();
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Headers để bypass anti-bot của LuatVietnam
 const CRAWL_HEADERS = {
@@ -85,7 +82,6 @@ const fetchFullContent = async (url) => {
  */
 const classifyWithAI = async (title, textSnippet) => {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
         const prompt = `Bạn là chuyên gia pháp lý Việt Nam. Phân loại văn bản luật sau vào MỘT nhóm:
 ${ALLOWED_CATEGORIES.join(', ')}.
 
@@ -93,8 +89,10 @@ Tiêu đề: ${title}
 Nội dung: ${textSnippet.substring(0, 1000)}
 
 Chỉ trả về tên nhóm chính xác.`;
-        const result = await model.generateContent(prompt);
-        const category = (await result.response).text().trim();
+        const category = await generateChatCompletion([
+            { role: 'system', content: 'Chỉ trả về đúng tên một nhóm trong danh sách được cung cấp.' },
+            { role: 'user', content: prompt }
+        ], { temperature: 0 });
         
         // Validate category
         const matched = ALLOWED_CATEGORIES.find(c => category.includes(c));
@@ -132,10 +130,6 @@ const crawlAndSaveDocument = async (url, customTitle = null) => {
         console.log(`  🏷️  Danh mục (Reuse): ${category}`);
     }
 
-    // Tạo embedding từ tiêu đề + 8000 ký tự đầu nội dung
-    const embeddingText = title + "\n" + fetched.text.substring(0, 8000);
-    const embedding = await generateEmbedding(embeddingText);
-
     const docData = {
         title,
         content: fetched.html,       // Lưu HTML vào trường content chính theo yêu cầu người dùng
@@ -144,8 +138,7 @@ const crawlAndSaveDocument = async (url, customTitle = null) => {
         category,
         sourceUrl: url,
         status: 'Published',
-        crawledAt: new Date(),
-        embedding
+        crawledAt: new Date()
     };
 
     const updated = await articleModel.findOneAndUpdate(
@@ -155,16 +148,10 @@ const crawlAndSaveDocument = async (url, customTitle = null) => {
     );
 
     if (updated && updated._id) {
-        if (embedding) updateVectorCache(updated._id, embedding);
         console.log(`  ✅ Đã lưu thành công (với HTML)!`);
-        
-        // Xây dựng đồ thị Neo4j cho văn bản đất đai mới crawl này
-        try {
-            const { extractGraphFromArticle } = require('./graphExtraction.service');
-            await extractGraphFromArticle(updated);
-        } catch (graphErr) {
-            console.error(`  [Neo4j Hook] Lỗi xây dựng đồ thị cho ${updated._id}:`, graphErr.message);
-        }
+        await refreshRagIndex().catch((indexError) =>
+            console.error('RAG index refresh failed after crawl:', indexError.message)
+        );
     }
 
     return updated;
