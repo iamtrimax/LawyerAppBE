@@ -1,6 +1,22 @@
 const { aiSearch } = require('../services/aiSearch.service');
 const articleServices = require('../services/article.services');
 const sanitizeError = require('../utils/sanitizeError');
+const { createArticleAttachmentUploadUrl } = require('../services/r2Storage.service');
+
+const createArticleAttachmentUploadUrlController = async (req, res) => {
+    try {
+        const upload = await createArticleAttachmentUploadUrl({
+            lawyerId: req.lawyer._id,
+            filename: req.body.filename,
+            contentType: req.body.contentType,
+            size: Number(req.body.size),
+        });
+        res.status(200).json({ success: true, ...upload });
+    } catch (error) {
+        console.error('createArticleAttachmentUploadUrlController error:', error.message);
+        res.status(error.statusCode || 500).json({ success: false, message: sanitizeError(error) });
+    }
+};
 
 const createArticleController = async (req, res) => {
     try {
@@ -181,6 +197,7 @@ const trackArticleDownloadController = async (req, res) => {
 };
 
 module.exports = {
+    createArticleAttachmentUploadUrlController,
     createArticleController,
     getArticlesController,
     getArticleDetailController,

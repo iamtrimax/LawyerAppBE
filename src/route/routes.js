@@ -10,6 +10,7 @@ const verifyLawyer = require("../../middleware/verifyLawyer");
 const rateLimiter = require("../../middleware/rateLimiter");
 const { handleSePayWebhookController, createPaymentLinkController, createMemberUpgradePaymentController, getMemberUpgradePaymentStatusController } = require("../controller/payment.controller");
 const {
+    createArticleAttachmentUploadUrlController,
     createArticleController,
     getArticlesController,
     getArticleDetailController,
@@ -90,6 +91,7 @@ router.get("/articles", publicData('articles'), getArticlesController);
 // QUAN TRỌNG: route slug phải đặt TRƯỚC route :id để Express không nhầm 'slug' là ID
 router.get("/articles/slug/:slug", publicData('article'), getArticleBySlugController);
 router.get("/articles/:id", publicData('article'), getArticleDetailController);
+router.post("/lawyer/articles/attachment-upload-url", verifyAccessToken, verifyLawyer, createArticleAttachmentUploadUrlController);
 router.post("/articles/create", verifyAccessToken, verifyLawyer, createArticleController);
 router.get("/articles/lawyer/my-articles", verifyAccessToken, verifyLawyer, getArticleByLawyerController);
 router.put("/articles/update/:id", verifyAccessToken, verifyLawyer, updateArticleController);

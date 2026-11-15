@@ -35,7 +35,7 @@ const getR2Client = ({ R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY }) 
     return client;
 };
 
-const createLegalFormUploadUrl = async ({ lawyerId, filename, contentType, size }) => {
+const createUploadUrl = async ({ ownerId, folder, filename, contentType, size }) => {
     const config = getR2Config();
     const extension = String(filename || '').split('.').pop().toLowerCase();
     const expectedContentType = ALLOWED_FILES[extension];
@@ -50,7 +50,7 @@ const createLegalFormUploadUrl = async ({ lawyerId, filename, contentType, size 
         throw error;
     }
 
-    const key = `legal-forms/${lawyerId}/${randomUUID()}.${extension}`;
+    const key = `${folder}/${ownerId}/${randomUUID()}.${extension}`;
     const command = new PutObjectCommand({
         Bucket: config.R2_BUCKET_NAME,
         Key: key,
@@ -65,4 +65,16 @@ const createLegalFormUploadUrl = async ({ lawyerId, filename, contentType, size 
     };
 };
 
-module.exports = { createLegalFormUploadUrl, MAX_UPLOAD_SIZE };
+const createLegalFormUploadUrl = options => createUploadUrl({
+    ...options,
+    ownerId: options.lawyerId,
+    folder: 'legal-forms',
+});
+
+const createArticleAttachmentUploadUrl = options => createUploadUrl({
+    ...options,
+    ownerId: options.lawyerId,
+    folder: 'article-attachments',
+});
+
+module.exports = { createLegalFormUploadUrl, createArticleAttachmentUploadUrl, MAX_UPLOAD_SIZE };
