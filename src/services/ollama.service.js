@@ -4,7 +4,7 @@ require('dotenv').config();
 
 const ollamaBaseUrl = () => (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
 
-const consumeChatStream = (stream, onToken, startedAt, model) => new Promise((resolve, reject) => {
+const consumeChatStream = (stream, onToken, startedAt, model, allowEmptyContent) => new Promise((resolve, reject) => {
     const decoder = new StringDecoder('utf8');
     let buffer = '';
     let content = '';
@@ -64,7 +64,14 @@ const consumeChatStream = (stream, onToken, startedAt, model) => new Promise((re
         if (settled) return;
         const answer = content.trim();
         if (!answer) {
-            fail(new Error(`Ollama không trả về nội dung; thinking chars=${thinkingLength}; tokens=${finalChunk.eval_count || 0}; done=${finalChunk.done_reason || 'unknown'}.`));
+            const detail = `thinking chars=${thinkingLength}; tokens=${finalChunk.eval_count || 0}; done=${finalChunk.done_reason || 'unknown'}`;
+            if (allowEmptyContent) {
+                console.warn(`[Ollama] Stream chỉ trả suy luận, bỏ nội dung đó và dùng fallback; ${detail}.`);
+                settled = true;
+                resolve('');
+                return;
+            }
+            fail(new Error(`Ollama không trả về nội dung; ${detail}.`));
             return;
         }
         settled = true;
@@ -105,7 +112,7 @@ const generateChatCompletion = async (messages, options = {}) => {
     }
     if (streaming) {
         try {
-            return await consumeChatStream(response.data, options.onToken, startedAt, model);
+            return await consumeChatStream(response.data, options.onToken, startedAt, model, options.allowEmptyContent === true);
         } catch (error) {
             console.error(`[Ollama] Chat stream lỗi sau ${Date.now() - startedAt} ms với model "${model}": ${error.message}`);
             throw error;
@@ -119,6 +126,7 @@ const generateChatCompletion = async (messages, options = {}) => {
     if (!content) {
         const thinkingLength = message?.thinking?.length || 0;
         console.error(`[Ollama] Phản hồi rỗng sau ${Date.now() - startedAt} ms; thinking chars=${thinkingLength}; tokens=${response.data?.eval_count || 0}; done=${response.data?.done_reason || 'unknown'}.`);
+        if (options.allowEmptyContent) return '';
         throw new Error('Ollama không trả về nội dung; có thể model đã dùng hết giới hạn sinh trong chế độ suy luận');
     }
     console.log(`[Ollama] Chat hoàn tất trong ${Date.now() - startedAt} ms; ${response.data.eval_count || 0} token sinh ra.`);

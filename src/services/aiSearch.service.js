@@ -2,11 +2,99 @@ const NodeCache = require('node-cache');
 const { retrieve, refreshIndex } = require('./rag.service');
 const { generateChatCompletion } = require('./ollama.service');
 const { runInteractiveRequest } = require('./ollamaPriority.service');
+const { isIndexedLookupQuery, searchIndexedDocuments } = require('./fastSearch.service');
 const sanitizeError = require('../utils/sanitizeError');
 require('dotenv').config();
 
-const searchCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
-const generateAnswer = async ({ query, history = [], matches, onToken, signal }) => {
+const searchCache = new NodeCache({ stdTTL: 300, checkperiod: 60, maxKeys: 500 });
+const hasVietnameseDiacritics = (text) => /[ăâđêôơưĂÂĐÊÔƠƯáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/.test(text);
+const internalReasoningPatterns = [
+    /^\s*(?:okay\b|first\b|let me\b|the user\b|looking at\b|i need to\b|we need to\b|according to (?:rule|the context)\b|the answer should\b|now i should\b)/i,
+    /\b(?:the user's query|the user is asking|the context has|i should respond|i need to make sure|let me check|rule [1-8])\b/i,
+    /^\s*(?:tôi sẽ suy nghĩ|tôi cần phân tích|tôi cần kiểm tra|trước hết tôi cần|người dùng đang hỏi|theo quy tắc|quy tắc số?\s*[1-8])/i
+];
+
+const isFinalVietnameseAnswer = (answer) => {
+    const text = String(answer || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    if (!text || internalReasoningPatterns.some((pattern) => pattern.test(text))) return false;
+    const firstSentence = text.split(/[.!?\n]/, 1)[0];
+    return hasVietnameseDiacritics(firstSentence);
+};
+
+const createExtractiveFallback = (query, matches) => {
+    const stopWords = new Set(['luật', 'cho', 'tôi', 'về', 'của', 'là', 'và', 'các', 'những', 'được', 'thế', 'nào', 'quy', 'định', 'theo', 'trong', 'khi', 'nếu', 'hãy', 'với']);
+    const terms = String(query || '').toLocaleLowerCase('vi').split(/\s+/).filter((word) => word.length > 2 && !stopWords.has(word));
+    const excerpts = matches.slice(0, 4).map((match, index) => {
+        const sentences = String(match.content || '').split(/(?<=[.!?;])\s+/).filter((sentence) => sentence.length > 35);
+        const best = sentences.map((sentence, order) => ({
+            sentence,
+            order,
+            score: terms.reduce((score, term) => score + (sentence.toLocaleLowerCase('vi').includes(term) ? 1 : 0), 0)
+        })).sort((a, b) => b.score - a.score || a.order - b.order)[0]?.sentence;
+        if (!best || !hasVietnameseDiacritics(best)) return null;
+        return `${best.slice(0, 500)} [Nguồn ${index + 1}]`;
+    }).filter(Boolean);
+
+    if (!excerpts.length) {
+        return 'Mình chưa thể tạo câu trả lời tiếng Việt đáng tin cậy từ các đoạn tài liệu hiện có. Bạn vui lòng hỏi cụ thể hơn để mình tra cứu lại.';
+    }
+    return `Theo tài liệu trong hệ thống:\n\n${excerpts.map((excerpt) => `• ${excerpt}`).join('\n\n')}`;
+};
+
+const createVietnameseStreamGuard = (onToken, onReplace) => {
+    let buffered = '';
+    let released = false;
+    let rejected = false;
+    let sentLength = 0;
+
+    return {
+        push(token) {
+            buffered += token;
+            if (!onToken || rejected) return;
+            if (internalReasoningPatterns.some((pattern) => pattern.test(buffered))) {
+                rejected = true;
+                return;
+            }
+            if (!released) {
+                const firstSentenceEnd = buffered.search(/[.!?\n]/);
+                if (firstSentenceEnd >= 0) {
+                    const opening = buffered.slice(0, firstSentenceEnd + 1);
+                    if (!hasVietnameseDiacritics(opening)) {
+                        rejected = true;
+                        return;
+                    }
+                    released = true;
+                    onToken(buffered);
+                    sentLength = buffered.length;
+                } else if (buffered.length >= 180) {
+                    if (!hasVietnameseDiacritics(buffered)) {
+                        rejected = true;
+                        return;
+                    }
+                    released = true;
+                    onToken(buffered);
+                    sentLength = buffered.length;
+                }
+                return;
+            }
+            onToken(token);
+            sentLength += token.length;
+        },
+        finish(answer, fallback) {
+            if (!isFinalVietnameseAnswer(answer) || rejected) {
+                console.warn('[AI Output Guard] Đã chặn nội dung suy luận/không phải tiếng Việt; dùng câu trả lời trích xuất từ tài liệu.');
+                if (onReplace) onReplace(fallback);
+                else if (onToken) onToken(fallback);
+                return fallback;
+            }
+            if (onToken && !released) onToken(answer);
+            else if (onToken && answer.length > sentLength) onToken(answer.slice(sentLength));
+            return answer;
+        }
+    };
+};
+
+const generateAnswer = async ({ query, history = [], matches, onToken, onReplace, signal }) => {
     const isQwen3 = process.env.OLLAMA_CHAT_MODEL?.toLowerCase().startsWith('qwen3');
     const context = matches.slice(0, 4).map((match, index) =>
         `[Nguồn ${index + 1}] Tiêu đề: ${match.title}\nDanh mục: ${match.category || 'Pháp luật'}\nNội dung trích từ tài liệu đã lưu trong hệ thống: ${match.content.slice(0, 2200)}`
@@ -14,18 +102,14 @@ const generateAnswer = async ({ query, history = [], matches, onToken, signal })
     const messages = [
         {
             role: 'system',
-            content: `Bạn là trợ lý pháp luật, giải thích quy định cho người dân bằng tiếng Việt rõ ràng, chính xác và dễ áp dụng.
-Yêu cầu khi trả lời:
-1. Trả lời thẳng điều người dùng hỏi ngay ở câu đầu; dùng tiếng Việt tự nhiên, kể cả khi câu hỏi hoặc tài liệu nguồn viết bằng ngôn ngữ khác.
-2. Giải thích nội dung pháp luật bằng lời dễ hiểu: quy định nói gì, áp dụng cho ai/trường hợp nào, và hệ quả hoặc việc cần làm tiếp theo nếu CONTEXT có nêu. Giải nghĩa thuật ngữ chuyên môn khi cần. Không chỉ nói tên tài liệu, không chỉ dẫn nguồn, không chép lại nguyên văn dài.
-3. Tập trung đúng phạm vi câu hỏi. Với câu hỏi rộng, tóm tắt các điểm chính theo gạch đầu dòng; với câu hỏi cụ thể, giải thích điều kiện, thời hạn, quyền/nghĩa vụ hoặc ngoại lệ liên quan nếu có trong CONTEXT. Có thể đưa ví dụ ngắn để làm rõ, nhưng phải ghi rõ đó là ví dụ và không thêm quy định ngoài tài liệu.
-4. Mỗi nhận định pháp lý phải được hỗ trợ bởi tài liệu trong CONTEXT và có trích dẫn [Nguồn 1], [Nguồn 2]... ngay sau nhận định. Chỉ trích dẫn số nguồn hiện diện trong CONTEXT. Không tự bịa điều luật, số điều, thời hạn, mức phạt, URL hoặc kết luận pháp lý.
-5. Chỉ sử dụng các tài liệu hệ thống được cung cấp trong CONTEXT; không tìm kiếm hoặc viện dẫn nguồn bên ngoài. Danh sách nguồn tham khảo được ứng dụng hiển thị riêng, vì vậy phần trả lời phải giải thích nội dung chứ không thay bằng danh sách nguồn.
-6. Nếu tài liệu không đủ để trả lời một phần, nói rõ phần nào chưa thể kết luận từ dữ liệu hiện có; vẫn trả lời các phần có căn cứ và dẫn nguồn cho chúng.
-7. Chỉ xuất câu trả lời cuối cùng bằng tiếng Việt. Không xuất suy luận nội bộ, từng bước phân tích, lời dẫn như "Okay, let me think", hoặc nhắc lại các quy tắc này.
-8. Lịch sử hội thoại chỉ dùng để hiểu câu hỏi tiếp nối; không dùng câu trả lời cũ làm căn cứ pháp lý thay cho CONTEXT.
+            content: `Bạn là trợ lý pháp luật dành cho người dùng Việt Nam.
+Hãy trả lời hoàn toàn bằng tiếng Việt. Chỉ viết câu trả lời cuối cùng; không nêu suy nghĩ nội bộ, phân tích từng bước, lời tự thuật hoặc nhắc lại yêu cầu trong prompt.
+Trả lời trực tiếp câu hỏi và giải thích quy định bằng ngôn ngữ dễ hiểu. Nêu đối tượng, điều kiện, quyền/nghĩa vụ và hệ quả khi tài liệu có thông tin. Không chỉ liệt kê tài liệu hoặc chỉ dẫn nguồn.
+Chỉ sử dụng CONTEXT bên dưới. Đặt [Nguồn 1], [Nguồn 2]... ngay sau nhận định được tài liệu hỗ trợ. Không tự tạo điều luật, số liệu hoặc căn cứ.
+Nếu CONTEXT không đủ, nêu rõ giới hạn bằng tiếng Việt và chỉ kết luận phần có căn cứ.
+Lịch sử chỉ dùng để hiểu câu hỏi tiếp nối, không phải căn cứ pháp lý.
 
-CONTEXT (chỉ gồm các đoạn trích từ tài liệu đã lưu và lập chỉ mục trong hệ thống):
+CONTEXT (đoạn trích từ tài liệu trong hệ thống):
 ${context || '(Không tìm thấy tài liệu liên quan trong dữ liệu hệ thống.)'}`
         },
         ...history.slice(-8).filter((message) => message?.text && message.senderID !== 'AI_ASSISTANT' && !message.isAiResponse).slice(-3).map((message) => ({
@@ -34,20 +118,26 @@ ${context || '(Không tìm thấy tài liệu liên quan trong dữ liệu hệ 
         })),
         {
             role: 'user',
-            content: query
-        },
-        // Qwen3's documented empty think block forces a direct final answer.
-        // This prevents the reasoning channel from consuming the whole output budget.
-        ...(isQwen3 ? [{ role: 'assistant', content: '<think>\n\n</think>\n\n' }] : [])
+            content: `${query}${isQwen3 ? '\n/no_think' : ''}`
+        }
     ];
 
-    return generateChatCompletion(messages, {
-        temperature: 0.6,
-        onToken,
-        signal,
-        ...(isQwen3 ? { think: false } : {}),
-        modelOptions: { top_p: 0.8, top_k: 20, num_ctx: 8192, num_predict: 512 }
-    });
+    const outputGuard = createVietnameseStreamGuard(onToken, onReplace);
+    let modelAnswer = '';
+    try {
+        modelAnswer = await generateChatCompletion(messages, {
+            temperature: 0.3,
+            onToken: (token) => outputGuard.push(token),
+            signal,
+            allowEmptyContent: true,
+            ...(isQwen3 ? { think: false } : {}),
+            modelOptions: { top_p: 0.8, top_k: 20, num_ctx: 8192, num_predict: 512 }
+        });
+    } catch (error) {
+        if (signal?.aborted) throw error;
+        console.warn(`[AI Output Guard] Model không tạo được câu trả lời chuẩn; dùng trích đoạn tài liệu: ${error.message}`);
+    }
+    return outputGuard.finish(modelAnswer, createExtractiveFallback(query, matches));
 };
 
 const aiSearch = async (query, history = [], streamCallbacks = {}) => runInteractiveRequest(async () => {
@@ -56,16 +146,32 @@ const aiSearch = async (query, history = [], streamCallbacks = {}) => runInterac
         const normalizedQuery = String(query || '').trim();
         if (!normalizedQuery) throw new Error('Câu hỏi không được để trống');
 
-        const cacheKey = `rag_vi_summary_v5_${normalizedQuery.toLowerCase()}`;
+        const cacheQuery = normalizedQuery.toLocaleLowerCase('vi').replace(/[.,!?;:()"“”]/g, ' ').replace(/\s+/g, ' ').trim();
+        const cacheKey = `rag_vi_answer_v7_${cacheQuery}`;
         if (!history.length) {
             const cached = searchCache.get(cacheKey);
             if (cached) {
+                console.log('[AI Fast Path] Cache hit; trả câu trả lời đã lưu trong bộ nhớ.');
                 streamCallbacks.onStatus?.('Đã tìm thấy câu trả lời trong bộ nhớ đệm.');
                 streamCallbacks.onToken?.(cached.answer);
                 return cached;
             }
         }
 
+        if (isIndexedLookupQuery(normalizedQuery)) {
+            streamCallbacks.onStatus?.('Đang tra cứu nhanh tài liệu trong MongoDB...');
+            const fastPathStartedAt = Date.now();
+            const fastResult = await searchIndexedDocuments(normalizedQuery);
+            if (fastResult) {
+                console.log(`[AI Fast Path] Trả ${fastResult.sources.length} tài liệu từ MongoDB trong ${Date.now() - fastPathStartedAt} ms.`);
+                if (!history.length) searchCache.set(cacheKey, fastResult);
+                streamCallbacks.onToken?.(fastResult.answer);
+                return fastResult;
+            }
+            console.log(`[AI Fast Path] Chưa tìm thấy tài liệu phù hợp trong ${Date.now() - fastPathStartedAt} ms; chuyển sang RAG.`);
+        }
+
+        console.log('[AI Route] Chuyển sang RAG: embedding → vector search → Qwen.');
         streamCallbacks.onStatus?.('Đang tìm tài liệu liên quan trong hệ thống...');
         const retrievalStartedAt = Date.now();
         const matches = await retrieve(normalizedQuery, undefined, { signal: streamCallbacks.signal });
@@ -85,6 +191,7 @@ const aiSearch = async (query, history = [], streamCallbacks = {}) => runInterac
             history,
             matches: uniqueMatches,
             onToken: streamCallbacks.onToken,
+            onReplace: streamCallbacks.onReplace,
             signal: streamCallbacks.signal
         });
         console.log(`[RAG] Sinh câu trả lời xong trong ${Date.now() - generationStartedAt} ms.`);

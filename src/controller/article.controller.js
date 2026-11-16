@@ -156,7 +156,8 @@ const aiSearchStreamController = async (req, res) => {
         const result = await aiSearch(query, Array.isArray(history) ? history : [], {
             signal: abortController.signal,
             onStatus: (message) => sendEvent('status', { message }),
-            onToken: (token) => sendEvent('token', { token })
+            onToken: (token) => sendEvent('token', { token }),
+            onReplace: (answer) => sendEvent('replace', { answer })
         });
         sendEvent('sources', { sources: result.sources });
         sendEvent('done', { elapsedMs: Date.now() - startedAt });
